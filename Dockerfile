@@ -1,0 +1,37 @@
+# DeepSeek Harness (dsh) — container image
+# Build:   docker build -t dsh:dev .
+# Run:     docker run -d --name dsh-web --network host dsh:dev
+#
+# NOTE: dsh web binds 127.0.0.1 only (it refuses --host 0.0.0.0 for RCE safety),
+# so `-p 3080:3080` does NOT work — the mapping targets the container's eth0, not
+# its loopback. Use `--network host`: the server's 127.0.0.1:3080 then lands on
+# the host loopback (on WSL2, reachable from Windows at http://127.0.0.1:3080/).
+
+FROM node:24
+
+# ── corepack + pnpm (pinned by repo) ──
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+
+# ── npm through the internal Nexus ──
+RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
+
+# ── app ──
+WORKDIR /app
+COPY . .
+
+# Install (immutable)
+RUN pnpm install --frozen-lockfile
+
+# The build context has no .git, so provide the source commit explicitly.
+# client-build-environment.ts uses this instead of calling `git rev-parse HEAD`.
+ARG DSH_CLIENT_COMMIT_HASH=b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+ENV DSH_CLIENT_COMMIT_HASH=${DSH_CLIENT_COMMIT_HASH}
+
+# Build library + web artifacts
+RUN pnpm run build
+
+# dsh web listens on 3080 by default
+EXPOSE 3080
+
+# Container has no browser: --no-open keeps it headless.
+CMD ["pnpm", "dsh", "web", "--no-open"]

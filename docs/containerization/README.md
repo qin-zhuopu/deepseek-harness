@@ -13,3 +13,4 @@ past it.
 | # | Title |
 |---|---|
 | [0001](0001-dockerize-dsh-pitfalls.md) | Dockerizing dsh: base image, git, commit hash, and loopback networking |
+| [0002](0002-configure-provider-over-api.md) | Configuring a custom LLM provider on a running instance over its HTTP API |

@@ -11,3 +11,4 @@
 | # | 标题 |
 |---|---|
 | [0001](0001-dockerize-dsh-pitfalls.zh.md) | 容器化 dsh:基础镜像、git、commit hash 与 loopback 网络 |
+| [0002](0002-configure-provider-over-api.zh.md) | 通过 HTTP API 在运行中的实例上配置自定义 LLM 提供方 |

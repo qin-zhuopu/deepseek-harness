@@ -10,6 +10,7 @@
 import { defineStore, type EngineStoreHandle } from '@deepseek-ai/dsh-client-runtime/client'
 import {
   clampWidth, DETAILS_DEFAULT, DETAILS_MAX, DETAILS_MIN,
+  PREVIEW_DEFAULT, PREVIEW_MAX, PREVIEW_MIN,
   SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
 } from './columns.ts'
 
@@ -20,7 +21,7 @@ import {
  * `narrowExpanded` is the manual override that re-expands the auto-collapsed
  * sidebar over the squeezed center without rewriting the width preference.
  */
-type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowExpanded: boolean }
+type LayoutState = { sidebar: number; details: number; preview: number; narrow: boolean; narrowExpanded: boolean }
 
 /**
  * Annotation twin of the actions literal below (the export needs a declared
@@ -29,10 +30,14 @@ type LayoutState = { sidebar: number; details: number; narrow: boolean; narrowEx
 type LayoutActions = {
   setSidebar: (draft: LayoutState, px: number) => void
   setDetails: (draft: LayoutState, px: number) => void
+  setPreview: (draft: LayoutState, px: number) => void
   toggleSidebar: (draft: LayoutState) => void
+  togglePreview: (draft: LayoutState) => void
   setNarrow: (draft: LayoutState, narrow: boolean) => void
   openDetails: (draft: LayoutState) => void
   closeDetails: (draft: LayoutState) => void
+  openPreview: (draft: LayoutState) => void
+  closePreview: (draft: LayoutState) => void
 }
 
 /**
@@ -47,10 +52,11 @@ type LayoutActions = {
  */
 export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutActions>  {
   const handle = defineStore({
-    init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false }),
+    init: (): LayoutState => ({ sidebar: SIDEBAR_DEFAULT, details: 0, preview: 0, narrow: false, narrowExpanded: false }),
     actions: {
       setSidebar: (d, px: number) => { d.sidebar = clampWidth(px, SIDEBAR_MIN, SIDEBAR_MAX) },
       setDetails: (d, px: number) => { d.details = clampWidth(px, DETAILS_MIN, DETAILS_MAX) },
+      setPreview: (d, px: number) => { d.preview = clampWidth(px, PREVIEW_MIN, PREVIEW_MAX) },
       // Narrow toggles flip only the override: the width preference survives
       // untouched, so re-widening restores the pre-squeeze layout.
       toggleSidebar: (d) => {
@@ -66,6 +72,13 @@ export function createLayoutStore(): EngineStoreHandle<LayoutState, LayoutAction
       },
       openDetails: (d) => { if (d.details === 0) d.details = DETAILS_DEFAULT },
       closeDetails: (d) => { d.details = 0 },
+      // Preview mirrors details' open/close semantics (the preference IS the
+      // width; closing forgets the drag width). Unlike the sidebar it has no
+      // narrow-collapse rail: below the breakpoint it simply stays closed
+      // until toggled, and the concession solve caps its rendered width.
+      togglePreview: (d) => { d.preview = d.preview === 0 ? PREVIEW_DEFAULT : 0 },
+      openPreview: (d) => { if (d.preview === 0) d.preview = PREVIEW_DEFAULT },
+      closePreview: (d) => { d.preview = 0 },
     },
   })
   return handle

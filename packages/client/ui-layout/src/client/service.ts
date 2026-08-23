@@ -27,11 +27,37 @@ export interface ILayout {
   openDetails(): void
   /** Close the details panel. */
   closeDetails(): void
+  /** Toggle the right preview column (closed ⟷ contract default width). */
+  togglePreview(): void
+  /** Open the preview column (no-op when already open). */
+  openPreview(): void
+  /** Close the preview column. */
+  closePreview(): void
+  /** Whether the preview column is currently open. */
+  isPreviewOpen(): boolean
+  /**
+   * Subscribe to layout panel-state changes (fires when preview opens/closes
+   * or resizes). Returns an unsubscribe. Lets a cross-plugin control (a footer
+   * toggle) reflect panel state through useSyncExternalStore.
+   * @param fn - listener invoked on each layout store change.
+   * @returns the unsubscribe function.
+   */
+  subscribe(fn: () => void): () => void
 }
 
 /** Cross-plugin panel-action face (ctx.layout). */
 export class LayoutController implements ILayout {
   #panels: PanelActions | undefined
+  // The inject hook delivers only the store's WRITE set (bound actions), never
+  // its snapshot source, and AppFrame is a pure component that cannot push
+  // state back. So the controller keeps an open/closed MIRROR for the preview
+  // column: every open/close transition flows through these methods, and drag
+  // resizes never cross the open line (stores.ts), so the mirror and the store
+  // stay in lockstep. A cross-plugin control (the sidebar footer toggle) reads
+  // and subscribes here to reflect preview state; the store has no
+  // persistence, so a fresh entry starts closed exactly like this mirror.
+  #previewOpen = false
+  readonly #listeners = new Set<() => void>()
 
   /**
    * Adopt the root entry's bound store actions. Called from the root
@@ -42,6 +68,10 @@ export class LayoutController implements ILayout {
    */
   attachPanels(actions: PanelActions): void {
     this.#panels = actions
+  }
+
+  #emit(): void {
+    for (const fn of [...this.#listeners]) fn()
   }
 
   /** Toggle the sidebar panel (closed ⟷ contract default width). */
@@ -57,6 +87,40 @@ export class LayoutController implements ILayout {
   /** Close the details panel. */
   closeDetails(): void {
     this.#require().closeDetails()
+  }
+
+  /** Toggle the right preview column (closed ⟷ contract default width). */
+  togglePreview(): void {
+    this.#require().togglePreview()
+    this.#previewOpen = !this.#previewOpen
+    this.#emit()
+  }
+
+  /** Open the preview column (no-op when already open). */
+  openPreview(): void {
+    this.#require().openPreview()
+    if (!this.#previewOpen) { this.#previewOpen = true; this.#emit() }
+  }
+
+  /** Close the preview column. */
+  closePreview(): void {
+    this.#require().closePreview()
+    if (this.#previewOpen) { this.#previewOpen = false; this.#emit() }
+  }
+
+  /** Whether the preview column is currently open. */
+  isPreviewOpen(): boolean {
+    return this.#previewOpen
+  }
+
+  /**
+   * Subscribe to preview open/close changes.
+   * @param fn - listener invoked on each preview transition.
+   * @returns the unsubscribe function.
+   */
+  subscribe(fn: () => void): () => void {
+    this.#listeners.add(fn)
+    return () => { this.#listeners.delete(fn) }
   }
 
   #require(): PanelActions {

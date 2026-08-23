@@ -81,6 +81,20 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * `id` is added beside the shipped entries instead of replacing them.
      */
     'shell.overlay': { kind: 'list'; scope: 'root' }
+    /**
+     * The right-edge preview column: a fourth real grid track, right of
+     * details, that participates in width distribution exactly like the
+     * sidebar — toggling or resizing it squeezes the center (1fr) conversation
+     * rather than floating over it. UNOCCUPIED by shipped UI: a feature that
+     * wants a persistent right rail (a browser preview, a docs pane) registers
+     * its single occupant here. `ctx.layout` owns open/close and the width;
+     * root scope, so it is available with or without a current session.
+     *
+     * The occupant receives the live column state (open, width) from the
+     * concession solve and renders nothing meaningful while width is 0 (the
+     * subtree stays mounted at zero width, like details).
+     */
+    'preview': { kind: 'single'; scope: 'root'; owner: PreviewOwnerProps }
   }
 }
 
@@ -104,6 +118,14 @@ export interface ConvOwnerProps {}
 /** Details owner share: empty — sessionId arrives as a framework-standard prop. */
 export interface DetailsOwnerProps {}
 
+/** Preview owner share: live right-column state from the frame's concession solve. */
+export interface PreviewOwnerProps {
+  /** True when the preview column is open (rendered width > 0). */
+  open: boolean
+  /** Rendered column width in px (0 when closed). */
+  width: number
+}
+
 /** Required services (cordis fiber inject — the loader passes all module exports as an object plugin). */
 export const inject = ['slots', 'theme']
 
@@ -124,6 +146,7 @@ export function apply(ctx: ClientContext): void {
         'conversation': { kind: 'single', scope: 'session-maybe' },
         'details': { kind: 'single', scope: 'session' },
         'shell.overlay': { kind: 'list', scope: 'root' },
+        'preview': { kind: 'single', scope: 'root' },
       },
       // Exclusive store: the factory itself — the framework instantiates per
       // entry and delivers useStore/actions to AppFrame as standard props.

@@ -12,10 +12,14 @@ function fakePanels(): PanelActions {
   return {
     setSidebar: vi.fn(),
     setDetails: vi.fn(),
+    setPreview: vi.fn(),
     toggleSidebar: vi.fn(),
+    togglePreview: vi.fn(),
     setNarrow: vi.fn(),
     openDetails: vi.fn(),
     closeDetails: vi.fn(),
+    openPreview: vi.fn(),
+    closePreview: vi.fn(),
   }
 }
 
@@ -54,5 +58,48 @@ describe('LayoutController', () => {
 
     expect(stale.toggleSidebar).not.toHaveBeenCalled()
     expect(fresh.toggleSidebar).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards the preview actions to the attached set', () => {
+    const service = new LayoutController()
+    const panels = fakePanels()
+    service.attachPanels(panels)
+
+    service.togglePreview()
+    service.openPreview()
+    service.closePreview()
+
+    expect(panels.togglePreview).toHaveBeenCalledTimes(1)
+    expect(panels.openPreview).toHaveBeenCalledTimes(1)
+    expect(panels.closePreview).toHaveBeenCalledTimes(1)
+  })
+
+  it('mirrors preview open state and notifies subscribers on each transition', () => {
+    const service = new LayoutController()
+    service.attachPanels(fakePanels())
+    const listener = vi.fn()
+    const off = service.subscribe(listener)
+
+    expect(service.isPreviewOpen()).toBe(false)
+    service.togglePreview()
+    expect(service.isPreviewOpen()).toBe(true)
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    // openPreview while already open is a no-op for the mirror (no extra notify).
+    service.openPreview()
+    expect(listener).toHaveBeenCalledTimes(1)
+
+    service.closePreview()
+    expect(service.isPreviewOpen()).toBe(false)
+    expect(listener).toHaveBeenCalledTimes(2)
+
+    off()
+    service.togglePreview()
+    expect(listener).toHaveBeenCalledTimes(2)
+  })
+
+  it('preview reads fail loud before the root entry wired its actions', () => {
+    const service = new LayoutController()
+    expect(() => { service.togglePreview() }).toThrow(/panel actions not wired/)
   })
 })

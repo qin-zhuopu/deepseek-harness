@@ -51,6 +51,7 @@ describe('ui-layout client apply', () => {
     expect(slots.spec('sidebar')).toEqual({ kind: 'single', scope: 'root' })
     expect(slots.spec('conversation')).toEqual({ kind: 'single', scope: 'session-maybe' })
     expect(slots.spec('details')).toEqual({ kind: 'single', scope: 'session' })
+    expect(slots.spec('preview')).toEqual({ kind: 'single', scope: 'root' })
   })
 
   it('injects no business face and attaches the layout actions', async () => {
@@ -58,7 +59,9 @@ describe('ui-layout client apply', () => {
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const actions = {
-      setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
+      setSidebar: vi.fn(), setDetails: vi.fn(), setPreview: vi.fn(),
+      toggleSidebar: vi.fn(), togglePreview: vi.fn(), setNarrow: vi.fn(),
+      openDetails: vi.fn(), closeDetails: vi.fn(), openPreview: vi.fn(), closePreview: vi.fn(),
     }
     const injected = (slots.entries('root')[0]!.inject as (actions: never) => object)(actions as never)
     expect(injected).toEqual({})

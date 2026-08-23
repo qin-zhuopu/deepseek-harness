@@ -51,11 +51,21 @@ export const PREVIEW_MAX = 900
 export const PREVIEW_DEFAULT = 480
 
 /**
+ * The always-present right icon rail: a fixed-width control column pinned to
+ * the frame's right edge, mirroring the collapsed sidebar rail on the left.
+ * It hosts the `rail.right.action` list slot (a stack of icon toggles like a
+ * VSCode secondary activity bar) and never resizes or hides — the preview
+ * column opens to its LEFT. 44px matches the rail's 28px control box between
+ * 8px paddings.
+ */
+export const RAIL_RIGHT = 44
+
+/**
  * Resolve the preview column's rendered width for a frame. Preview never
  * concedes (mirrors the sidebar): a closed preview is zero width, an open one
- * is its clamped preference — but it is capped so the sidebar rail plus the
- * center floor always survive, so opening or widening preview on a narrow
- * frame cannot starve the conversation to nothing.
+ * is its clamped preference — but it is capped so the sidebar rail, the right
+ * icon rail, and the center floor always survive, so opening or widening
+ * preview on a narrow frame cannot starve the conversation to nothing.
  * @param viewport - available frame width in px.
  * @param preview - preview width preference in px (0 = closed).
  * @returns the preview column's rendered width (0 when closed).
@@ -63,9 +73,9 @@ export const PREVIEW_DEFAULT = 480
 export function resolvePreview(viewport: number, preview: number): number {
   if (preview === 0) return 0
   const want = clampWidth(preview, PREVIEW_MIN, PREVIEW_MAX)
-  // Reserve the collapsed rail + center floor; never shrink below PREVIEW_MIN
-  // (below that the column is not worth showing — the fallback keeps it usable).
-  const room = viewport - SIDEBAR_COLLAPSED - CENTER_MIN
+  // Reserve the left rail, the right icon rail, and the center floor; never
+  // shrink below PREVIEW_MIN (below that the column is not worth showing).
+  const room = viewport - SIDEBAR_COLLAPSED - RAIL_RIGHT - CENTER_MIN
   return Math.max(PREVIEW_MIN, Math.min(want, room))
 }
 

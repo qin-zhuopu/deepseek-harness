@@ -15,7 +15,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
-import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
+import { RAIL_RIGHT, SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import type {
   SessionId, SessionListState, WorkspaceListState,
@@ -62,6 +62,7 @@ function mountFrame() {
     if (key === 'conversation') return <div data-testid="center-content" />
     if (key === 'details') return <div data-testid="details-content" />
     if (key === 'preview') return <div data-testid="preview-content" />
+    if (key === 'rail.right.action') return <div data-testid="rail-content" />
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
@@ -96,17 +97,18 @@ function mountFrame() {
   return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
-// The frame template now carries a fourth preview track; this helper returns
-// [sidebar, details] to keep the existing three-column assertions intact, and
-// previewTrack() reads the fourth when a test needs it.
+// The frame template carries five tracks: sidebar | 1fr | details | preview |
+// right-rail. This helper returns [sidebar, details] to keep the existing
+// three-column assertions intact; previewTrack() reads the preview track.
+const TEMPLATE_RE = /^(\d+)px minmax\(0, 1fr\) (\d+)px (\d+)px (\d+)px$/
 function tracks(frame: HTMLElement): number[] {
-  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px (\d+)px$/.exec(frame.style.gridTemplateColumns)
+  const m = TEMPLATE_RE.exec(frame.style.gridTemplateColumns)
   if (m === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
   return [Number(m[1]), Number(m[2])]
 }
 
 function previewTrack(frame: HTMLElement): number {
-  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px (\d+)px$/.exec(frame.style.gridTemplateColumns)
+  const m = TEMPLATE_RE.exec(frame.style.gridTemplateColumns)
   if (m === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
   return Number(m[3])
 }
@@ -245,7 +247,9 @@ describe('AppFrame', () => {
   })
 
   it('drag base is the rendered (concession-clamped) width, not the preference', () => {
-    frameWidth = 1250 // step-2 squeeze: details renders 330 while preference is 360
+    // 1294 - RAIL_RIGHT(44) = 1250 effective: step-2 squeeze renders details
+    // at 330 while preference is 360 (the fixed right rail costs 44px).
+    frameWidth = 1294
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
     expect(tracks(frame)).toEqual([280, 330])
@@ -274,7 +278,7 @@ describe('AppFrame', () => {
   it('preview opens as a fourth right-edge track and squeezes the center', () => {
     const { frame, instance } = mountFrame()
     expect(previewTrack(frame)).toBe(0)
-    const centerBefore = tracks(frame) // [280, 0]; center is 1fr = 1920-280-0
+    const centerBefore = tracks(frame) // [280, 0]; center is 1fr = 1920-280-44-0
     expect(centerBefore).toEqual([280, 0])
     act(() => { instance.actions.togglePreview() })
     // Preview renders its default width; sidebar/details untouched, so the
@@ -297,10 +301,11 @@ describe('AppFrame', () => {
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.togglePreview() })
     expect(previewTrack(frame)).toBe(480)
-    // Preview's left border sits at viewport - preview = 1920 - 480 = 1440.
+    // Preview's left border sits at viewport - RAIL_RIGHT - preview =
+    // 1920 - 44 - 480 = 1396. (Drag uses dx, so the absolute x is not asserted.)
     const handles = frame.querySelectorAll('[class*="handle"]')
     // handles: [sidebar, preview] (details closed). Drag the last one leftward.
-    drag(handles[handles.length - 1]!, 1440, 1400)
+    drag(handles[handles.length - 1]!, 1396, 1356)
     expect(previewTrack(frame)).toBe(520)
   })
 
@@ -313,10 +318,27 @@ describe('AppFrame', () => {
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
   })
 
+  it('always renders the fixed right icon rail as the last track', () => {
+    const { frame, getByTestId } = mountFrame()
+    expect(getByTestId('rail-content')).toBeTruthy()
+    // Fifth track is the fixed rail; it is present whether or not preview is open.
+    expect(frame.style.gridTemplateColumns.endsWith(`${RAIL_RIGHT}px`)).toBe(true)
+  })
+
+  it('the right rail persists when the preview column opens and closes', () => {
+    const { frame, instance } = mountFrame()
+    expect(frame.style.gridTemplateColumns.endsWith(`${RAIL_RIGHT}px`)).toBe(true)
+    act(() => { instance.actions.togglePreview() })
+    expect(frame.style.gridTemplateColumns.endsWith(`${RAIL_RIGHT}px`)).toBe(true)
+    expect(previewTrack(frame)).toBe(480)
+    act(() => { instance.actions.closePreview() })
+    expect(frame.style.gridTemplateColumns.endsWith(`${RAIL_RIGHT}px`)).toBe(true)
+  })
+
   it('viewport shrink triggers the concession chain via ResizeObserver', () => {
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
-    frameWidth = 1250
+    frameWidth = 1294 // 1294 - RAIL_RIGHT(44) = 1250 effective: step-2 squeeze
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
     frameWidth = 1920
@@ -443,7 +465,7 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
   it('double resize inside one frame rides the pending rAF (??= guard)', () => {
     const { frame, instance } = mountFrame()
     act(() => { instance.actions.openDetails() })
-    frameWidth = 1250
+    frameWidth = 1294 // 1294 - RAIL_RIGHT(44) = 1250 effective: step-2 squeeze
     act(() => { fireResize?.(); fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
   })

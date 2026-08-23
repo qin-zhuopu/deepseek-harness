@@ -61,6 +61,7 @@ function mountFrame() {
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
     if (key === 'conversation') return <div data-testid="center-content" />
     if (key === 'details') return <div data-testid="details-content" />
+    if (key === 'preview') return <div data-testid="preview-content" />
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
@@ -95,10 +96,19 @@ function mountFrame() {
   return { instance, frame, slotCalls, rerenderFrame: () => { utils.rerender(element()) }, ...utils }
 }
 
+// The frame template now carries a fourth preview track; this helper returns
+// [sidebar, details] to keep the existing three-column assertions intact, and
+// previewTrack() reads the fourth when a test needs it.
 function tracks(frame: HTMLElement): number[] {
-  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px$/.exec(frame.style.gridTemplateColumns)
+  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px (\d+)px$/.exec(frame.style.gridTemplateColumns)
   if (m === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
   return [Number(m[1]), Number(m[2])]
+}
+
+function previewTrack(frame: HTMLElement): number {
+  const m = /^(\d+)px minmax\(0, 1fr\) (\d+)px (\d+)px$/.exec(frame.style.gridTemplateColumns)
+  if (m === null) throw new Error(`unexpected template: ${frame.style.gridTemplateColumns}`)
+  return Number(m[3])
 }
 
 function drag(handle: Element, fromX: number, toX: number): void {
@@ -259,6 +269,48 @@ describe('AppFrame', () => {
     expect(frame.hasAttribute('data-sidebar-collapsed')).toBe(true)
     const lastSidebarCall = slotCalls.filter(c => c.key === 'sidebar').at(-1)!
     expect(lastSidebarCall.props).toEqual({ collapsed: true, width: SIDEBAR_COLLAPSED })
+  })
+
+  it('preview opens as a fourth right-edge track and squeezes the center', () => {
+    const { frame, instance } = mountFrame()
+    expect(previewTrack(frame)).toBe(0)
+    const centerBefore = tracks(frame) // [280, 0]; center is 1fr = 1920-280-0
+    expect(centerBefore).toEqual([280, 0])
+    act(() => { instance.actions.togglePreview() })
+    // Preview renders its default width; sidebar/details untouched, so the
+    // center (1fr) absorbs the whole preview width — the conversation shrinks.
+    expect(previewTrack(frame)).toBe(480)
+    expect(tracks(frame)).toEqual([280, 0])
+  })
+
+  it('preview owner props carry live open/width; body stays mounted at zero width', () => {
+    const { frame, instance, slotCalls, getByTestId } = mountFrame()
+    expect(getByTestId('preview-content')).toBeTruthy()
+    expect(slotCalls.find(c => c.key === 'preview')!.props).toEqual({ open: false, width: 0 })
+    expect(frame.hasAttribute('data-preview-collapsed')).toBe(true)
+    act(() => { instance.actions.togglePreview() })
+    expect(slotCalls.filter(c => c.key === 'preview').at(-1)!.props).toEqual({ open: true, width: 480 })
+    expect(frame.hasAttribute('data-preview-collapsed')).toBe(false)
+  })
+
+  it('preview drag widens leftward (negative dx grows the column)', () => {
+    const { frame, instance } = mountFrame()
+    act(() => { instance.actions.togglePreview() })
+    expect(previewTrack(frame)).toBe(480)
+    // Preview's left border sits at viewport - preview = 1920 - 480 = 1440.
+    const handles = frame.querySelectorAll('[class*="handle"]')
+    // handles: [sidebar, preview] (details closed). Drag the last one leftward.
+    drag(handles[handles.length - 1]!, 1440, 1400)
+    expect(previewTrack(frame)).toBe(520)
+  })
+
+  it('preview handle appears only while open', () => {
+    const { frame, instance } = mountFrame()
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1) // sidebar only
+    act(() => { instance.actions.togglePreview() })
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2) // + preview
+    act(() => { instance.actions.closePreview() })
+    expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
   })
 
   it('viewport shrink triggers the concession chain via ResizeObserver', () => {

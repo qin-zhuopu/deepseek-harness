@@ -223,6 +223,11 @@
     - id: ui-cordis
       name: '@deepseek-ai/dsh-client-ui-cordis'
 
+    # Toggleable floating preview sidebar: a sidebar footer icon button opens a
+    # right-side overlay that embeds the Chrome noVNC page in an iframe.
+    - id: ui-vnc-preview
+      name: '@deepseek-ai/dsh-client-ui-vnc-preview'
+
     # Durable workflow lifecycle as an independent Chat node after the
     # existing generic workflow tool row.
     - id: ui-workflow-run

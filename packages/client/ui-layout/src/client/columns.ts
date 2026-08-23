@@ -38,6 +38,37 @@ export const DETAILS_MAX = 520
 /** Details width before any user drag. */
 export const DETAILS_DEFAULT = 360
 
+// Preview is a fourth track on the frame's right edge (right of details).
+// Like the sidebar it never concedes: AppFrame subtracts its resolved width
+// from the viewport before the three-column solve, so the center (1fr) absorbs
+// the squeeze and details still concedes/auto-closes against the reduced
+// frame. Kept off computeColumns' signature so the solver contract is frozen.
+/** Preview drag clamp floor. */
+export const PREVIEW_MIN = 320
+/** Preview drag clamp ceiling. */
+export const PREVIEW_MAX = 900
+/** Preview width before any user drag (0 = closed). */
+export const PREVIEW_DEFAULT = 480
+
+/**
+ * Resolve the preview column's rendered width for a frame. Preview never
+ * concedes (mirrors the sidebar): a closed preview is zero width, an open one
+ * is its clamped preference — but it is capped so the sidebar rail plus the
+ * center floor always survive, so opening or widening preview on a narrow
+ * frame cannot starve the conversation to nothing.
+ * @param viewport - available frame width in px.
+ * @param preview - preview width preference in px (0 = closed).
+ * @returns the preview column's rendered width (0 when closed).
+ */
+export function resolvePreview(viewport: number, preview: number): number {
+  if (preview === 0) return 0
+  const want = clampWidth(preview, PREVIEW_MIN, PREVIEW_MAX)
+  // Reserve the collapsed rail + center floor; never shrink below PREVIEW_MIN
+  // (below that the column is not worth showing — the fallback keeps it usable).
+  const room = viewport - SIDEBAR_COLLAPSED - CENTER_MIN
+  return Math.max(PREVIEW_MIN, Math.min(want, room))
+}
+
 /**
  * Clamp a panel width into its contract range.
  * @param px - requested width.

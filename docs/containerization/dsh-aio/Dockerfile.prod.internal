@@ -1,0 +1,64 @@
+# =====================================================================
+# DeepSeek Harness — ALL-IN-ONE image (PRODUCTION / air-gapped variant)
+# dsh web + Chrome (CDP) + noVNC + chrome-devtools MCP, pre-wired.
+#
+# Build:  docker build -t dsh-aio:prod -f Dockerfile.prod.internal .
+# Run:    docker run -d --name dsh-aio --network host --shm-size=1g \
+#             -e NR_API_KEY=<your-key> dsh-aio:prod
+# Open:   dsh Web UI  -> http://127.0.0.1:3080/
+#         Chrome view -> http://127.0.0.1:6080/vnc.html
+#
+# Combines the two variants:
+#   • PRODUCTION: boots dsh from the COMPILED CLI entry (apps/cli/lib/bin.js)
+#     via entrypoint.prod.sh — no runtime tsx transpile, ~5s startup.
+#   • INTERNAL: for hosts with NO public egress (e.g. 10.1.17.58). node comes
+#     from harbor; the apt VNC stack is pulled through the internal Nexus apt
+#     mirror with serialized downloads (the mirror 502s under apt's default
+#     parallel fetches).
+#
+# NOTE: stage 1 needs dsh:dev built first (from ../../Dockerfile.internal).
+# The full workspace node_modules is intentionally kept — `pnpm prune --prod`
+# collapses the pnpm workspace symlink tree and breaks module resolution.
+# --network host is required (dsh web binds 127.0.0.1 only for RCE safety).
+# =====================================================================
+
+# ---- Stage 1: reuse the already-built dsh app (compiled lib/ + web dist) ----
+FROM dsh:dev AS dshbuild
+# /app is fully installed + built here.
+
+# ---- Stage 2: runtime on the Chrome base ----
+FROM harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
+
+# Node 24 in an isolated prefix (base image ships an unusable nvm node).
+COPY --from=harbor.jereh.cn/base/node:24 /usr/local/bin/node /opt/node/bin/node
+COPY --from=harbor.jereh.cn/base/node:24 /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
+ENV PATH=/opt/node/bin:$PATH
+RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
+ && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \
+ && npm install -g pnpm@11.7.0 chrome-devtools-mcp@1.7.0
+
+# VNC stack: virtual display, VNC server, noVNC web bridge, a light WM.
+# Repoint apt at the internal Nexus mirror (no public egress on this host).
+# Serialize downloads: the mirror 502s under apt's default parallel fetches.
+RUN sed -i 's|http://mirrors.aliyun.com/ubuntu/|http://10.1.7.49:8081/repository/apt-aliyun/|g' /etc/apt/sources.list \
+ && apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
+ && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
+      xvfb x11vnc fluxbox novnc websockify x11-utils curl \
+ && rm -rf /var/lib/apt/lists/*
+
+# The built dsh application.
+COPY --from=dshbuild /app /app
+
+# Pre-wired DSH_HOME: web profile, nr provider, default model, chrome MCP patch.
+# (no credentials, no sessions — NR_API_KEY comes from -e at runtime)
+COPY dshhome/.dsh /root/.dsh
+
+# Supervisor that launches the whole stack from the COMPILED entry.
+COPY entrypoint.prod.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENV DSH_HOME=/root/.dsh
+# dsh web (3080), noVNC (6080), raw VNC (5900), Chrome CDP (9222)
+EXPOSE 3080 6080 5900 9222
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

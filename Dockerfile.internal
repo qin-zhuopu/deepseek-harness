@@ -1,0 +1,45 @@
+# DeepSeek Harness (dsh) — container image (INTERNAL / air-gapped variant)
+# Build:   docker build -t dsh:dev -f Dockerfile.internal .
+# Run:     docker run -d --name dsh-web --network host dsh:dev
+#
+# Use this instead of ./Dockerfile on hosts with NO public egress (e.g. the
+# 10.1.17.58 app server). Everything is pulled through the internal Jereh
+# Nexus mirror; nothing here reaches registry.npmjs.org / dl-cdn.
+#
+# Differences from the public ./Dockerfile:
+#   • base image is pulled from harbor (node:24 is mirrored there)
+#   • corepack is pointed at Nexus (it otherwise hardcodes registry.npmjs.org
+#     to fetch pnpm, which is unreachable air-gapped)
+#   • pnpm install runs --no-frozen-lockfile so a locally-adjusted lockfile
+#     (e.g. release-age exclusions) still resolves.
+
+FROM harbor.jereh.cn/base/node:24
+
+# ── corepack + pnpm (pinned by repo), fetched through the internal Nexus ──
+ENV COREPACK_NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
+ENV COREPACK_INTEGRITY_KEYS=0
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+
+# ── npm through the internal Nexus ──
+RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
+
+# ── app ──
+WORKDIR /app
+COPY . .
+
+# Install (lockfile may carry local mirror/policy tweaks)
+RUN pnpm install --no-frozen-lockfile
+
+# The build context has no .git, so provide the source commit explicitly.
+# client-build-environment.ts uses this instead of calling `git rev-parse HEAD`.
+ARG DSH_CLIENT_COMMIT_HASH=b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
+ENV DSH_CLIENT_COMMIT_HASH=${DSH_CLIENT_COMMIT_HASH}
+
+# Build library + web artifacts
+RUN pnpm run build
+
+# dsh web listens on 3080 by default
+EXPOSE 3080
+
+# Container has no browser: --no-open keeps it headless.
+CMD ["pnpm", "dsh", "web", "--no-open"]

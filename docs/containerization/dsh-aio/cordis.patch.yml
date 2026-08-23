@@ -1,0 +1,18 @@
+# Baked chrome-devtools MCP client. Uses the image's pre-installed
+# chrome-devtools-mcp (no runtime npx download), bridging to the local Chrome
+# CDP endpoint started by the same container's supervisor.
+- insert:
+    - id: chrome-devtools-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: chrome
+        transport: stdio
+        command: /opt/node/bin/chrome-devtools-mcp
+        args:
+          - --browserUrl
+          - http://127.0.0.1:9222
+        cwd: !!js process.cwd()
+        env:
+          CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: "1"
+        toolCallTimeoutMs: 120000
+        failOnStartupError: false

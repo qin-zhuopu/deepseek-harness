@@ -1,41 +1,26 @@
-/* Sidebar-foot preview toggle, matching the shipped footer-action styling. */
+/* Right-rail preview toggle: mirrors the collapsed sidebar's rail icon boxes
+   (a 28px control centered in the fixed rail). */
 
-.footerButtons {
-  display: flex;
-  align-items: center;
-  width: 100%;
-}
-
-.badge {
+.railButton {
+  flex: none;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: calc(100% + 4px);
-  height: 42px;
-  margin: 0 -2px;
-  padding: 0 10px 0 8px;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 12px;
+  border-radius: 50%;
+  padding: 0;
   background: transparent;
   color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  font-size: 14px;
   cursor: pointer;
-  overflow: hidden;
 }
 
-.badge:hover {
+.railButton:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.badge[data-active] {
+.railButton[data-active] {
   background: var(--dsw-alias-interactive-bg-hover);
   color: var(--dsw-alias-state-business-primary);
-}
-
-.badgeLabel {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

@@ -60,6 +60,21 @@
   border-left: none;
 }
 
+/* The always-present right icon rail: mirror of the collapsed sidebar rail.
+   Fixed width (RAIL_RIGHT), pinned to the frame's right edge, a top-down
+   stack of icon controls with a left seam. It never resizes or hides. */
+.rightRailCol {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0;
+  background: var(--dsw-specific-sidebar-fill);
+  border-left: 1px solid var(--dsw-alias-border-l1);
+}
+
 /* Drag handles are frame children (columns clip overflow): an 8px hit strip
    centered on the column border via inline left, above column content. Details
    adds a visible 12x32 pill at vertical center; sidebar keeps only the hit strip. */

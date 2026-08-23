@@ -13,14 +13,14 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PropsRenderSlots, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import { computeColumns, resolvePreview, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
+import { computeColumns, RAIL_RIGHT, resolvePreview, SIDEBAR_AUTO_COLLAPSE, SIDEBAR_DEFAULT } from './columns.ts'
 import type { createLayoutStore } from './stores.ts'
 import css from './AppFrame.module.css'
 
 /** Full composed props: runtime share + child-slot render share + store share. */
 export type AppFrameProps =
   & PropsRuntime<'root'>
-  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'preview'>
+  & PropsRenderSlots<'sidebar' | 'conversation' | 'details' | 'shell.overlay' | 'preview' | 'rail.right.action'>
   & PropsStore<ReturnType<typeof createLayoutStore>>
 
 /** Center column grid item (session-body building block). */
@@ -36,6 +36,11 @@ function DetailsColumn(props: { children?: ReactNode }) {
 /** Preview column grid item; width 0 keeps the subtree mounted (never unmount on close). */
 function PreviewColumn(props: { children?: ReactNode }) {
   return <div className={css.previewCol}>{props.children}</div>
+}
+
+/** Right icon-rail grid item: fixed-width control column pinned to the frame's right edge. */
+function RightRailColumn(props: { children?: ReactNode }) {
+  return <div className={css.rightRailCol}>{props.children}</div>
 }
 
 /**
@@ -150,7 +155,10 @@ export function AppFrame({
   // center (1fr) conversation and, if needed, makes details concede — exactly
   // the sidebar's non-conceding contract, mirrored on the right edge.
   const preview = resolvePreview(viewport, panels.preview)
-  const cols = computeColumns(viewport - preview, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
+  // The right icon rail is a fixed, always-present track: subtract it (with
+  // the preview) from the frame before the three-column solve, so the center
+  // (1fr) absorbs both and details still concedes against the reduced frame.
+  const cols = computeColumns(viewport - preview - RAIL_RIGHT, sidebarPreference, detailsSession === undefined ? 0 : panels.details)
   const colsRef = useRef(cols)
   colsRef.current = cols
   const previewRef = useRef(preview)
@@ -185,7 +193,7 @@ export function AppFrame({
     <div
       ref={frameRef}
       className={css.frame}
-      style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${preview}px` }}
+      style={{ gridTemplateColumns: `${cols.sidebar}px minmax(0, 1fr) ${cols.details}px ${preview}px ${RAIL_RIGHT}px` }}
       data-sidebar-collapsed={sidebarCollapsed || undefined}
       data-details-collapsed={cols.details === 0 || undefined}
       data-preview-collapsed={preview === 0 || undefined}
@@ -214,15 +222,20 @@ export function AppFrame({
             state (open, width) comes from the concession solve; a closed
             preview stays mounted at zero width like details. */}
         <PreviewColumn>{renderSlot('preview', { open: preview > 0, width: preview })}</PreviewColumn>
+        {/* The always-present right icon rail, pinned to the frame's right
+            edge (right of preview). A list seat: an extensible stack of icon
+            toggles, like a secondary activity bar. */}
+        <RightRailColumn>{renderSlot('rail.right.action', { width: RAIL_RIGHT })}</RightRailColumn>
       </>
       <div className={css.overlayLayer} data-shell-overlay>
         {renderSlot('shell.overlay', {})}
       </div>
       {/* The collapsed rail is fixed-width: no resize handle while closed. */}
       {!sidebarCollapsed && <DragHandle side="sidebar" left={cols.sidebar} onStart={onSidebarStart} onDrag={onSidebarDrag} onEnd={onDragEnd} />}
-      {/* Details' right border now sits left of the preview track. */}
-      {cols.details > 0 && <DragHandle side="details" left={viewport - preview - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
-      {preview > 0 && <DragHandle side="preview" left={viewport - preview} onStart={onPreviewStart} onDrag={onPreviewDrag} onEnd={onDragEnd} />}
+      {/* Details' right border sits left of the preview + right-rail tracks. */}
+      {cols.details > 0 && <DragHandle side="details" left={viewport - RAIL_RIGHT - preview - cols.details} onStart={onDetailsStart} onDrag={onDetailsDrag} onEnd={onDragEnd} />}
+      {/* Preview's left border sits left of the fixed right rail. */}
+      {preview > 0 && <DragHandle side="preview" left={viewport - RAIL_RIGHT - preview} onStart={onPreviewStart} onDrag={onPreviewDrag} onEnd={onDragEnd} />}
     </div>
   )
 }

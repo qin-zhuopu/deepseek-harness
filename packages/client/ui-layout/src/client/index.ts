@@ -95,6 +95,19 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      * subtree stays mounted at zero width, like details).
      */
     'preview': { kind: 'single'; scope: 'root'; owner: PreviewOwnerProps }
+    /**
+     * The always-present right icon rail: a fixed-width control column pinned
+     * to the frame's right edge, the mirror of the collapsed sidebar rail on
+     * the left. A `list` seat, so it is an EXTENSIBLE stack of icon toggles
+     * (a secondary activity bar): entries add beside one another by `order`,
+     * none replaces another. Root scope, so the rail is available with or
+     * without a current session, and the rail itself never hides or resizes.
+     *
+     * This is where a right-docked panel puts its toggle — e.g. the VNC
+     * preview registers its open/close button here, and the preview column
+     * opens to the rail's left.
+     */
+    'rail.right.action': { kind: 'list'; scope: 'root'; owner: RailRightOwnerProps }
   }
 }
 
@@ -126,6 +139,12 @@ export interface PreviewOwnerProps {
   width: number
 }
 
+/** Right-rail owner share: the fixed rail width, so entries can size their icon box. */
+export interface RailRightOwnerProps {
+  /** The rail column's fixed width in px. */
+  width: number
+}
+
 /** Required services (cordis fiber inject — the loader passes all module exports as an object plugin). */
 export const inject = ['slots', 'theme']
 
@@ -147,6 +166,7 @@ export function apply(ctx: ClientContext): void {
         'details': { kind: 'single', scope: 'session' },
         'shell.overlay': { kind: 'list', scope: 'root' },
         'preview': { kind: 'single', scope: 'root' },
+        'rail.right.action': { kind: 'list', scope: 'root' },
       },
       // Exclusive store: the factory itself — the framework instantiates per
       // entry and delivers useStore/actions to AppFrame as standard props.

@@ -23,8 +23,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { PreviewToggle } from './PreviewToggle.tsx'
 import { PreviewPanel } from './PreviewPanel.tsx'
 
-/** Default noVNC page for the local Chrome-over-noVNC setup. */
-const DEFAULT_VNC_URL = 'http://127.0.0.1:6080/vnc.html'
+/**
+ * Default noVNC page for the local Chrome-over-noVNC setup. `resize=scale`
+ * makes noVNC scale the whole remote desktop to fit the iframe (preserving
+ * aspect ratio) instead of showing a 1:1 slice of the fixed-resolution Xvfb
+ * canvas — so the picture follows the preview column width as it is dragged.
+ */
+const DEFAULT_VNC_URL = 'http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale'
 
 /** Read the boot-time URL override, falling back to the local default. */
 function resolveVncUrl(): string {

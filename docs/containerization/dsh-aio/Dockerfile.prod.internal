@@ -1,6 +1,6 @@
 # =====================================================================
 # DeepSeek Harness — ALL-IN-ONE image (PRODUCTION / air-gapped variant)
-# dsh web + Chrome (CDP) + noVNC + chrome-devtools MCP, pre-wired.
+# dsh web + Chrome (CDP) + Xvnc + noVNC + chrome-devtools MCP, prewired.
 #
 # Build:  docker build -t dsh-aio:prod -f Dockerfile.prod.internal .
 # Run:    docker run -d --name dsh-aio --network host --shm-size=1g \
@@ -8,18 +8,22 @@
 # Open:   dsh Web UI  -> http://127.0.0.1:3080/
 #         Chrome view -> http://127.0.0.1:6080/vnc.html
 #
-# Combines the two variants:
+# Combines the variants:
 #   • PRODUCTION: boots dsh from the COMPILED CLI entry (apps/cli/lib/bin.js)
-#     via entrypoint.prod.sh — no runtime tsx transpile, ~5s startup.
-#   • INTERNAL: for hosts with NO public egress (e.g. 10.1.17.58). node comes
-#     from harbor; the apt VNC stack is pulled through the internal Nexus apt
-#     mirror with serialized downloads (the mirror 502s under apt's default
-#     parallel fetches).
+#     via entrypoint.prod.sh — no runtime tsx transpile, ~1s startup.
+#   • Xvnc + resize sidecar: noVNC stays in smooth resize=scale mode while
+#     the desktop geometry follows the viewer's viewport (debounced), so the
+#     picture fills the frame without the flicker of resize=remote.
+#   • INTERNAL: for hosts with NO public egress (e.g. 10.1.17.58). node
+#     comes from harbor; the apt stack is pulled through the internal Nexus
+#     apt mirror with serialized downloads (the mirror 502s under apt's
+#     default parallel fetches).
 #
 # NOTE: stage 1 needs dsh:dev built first (from ../../Dockerfile.internal).
-# The full workspace node_modules is intentionally kept — `pnpm prune --prod`
-# collapses the pnpm workspace symlink tree and breaks module resolution.
-# --network host is required (dsh web binds 127.0.0.1 only for RCE safety).
+# The full workspace node_modules is kept — `pnpm prune --prod` collapses the
+# pnpm workspace symlink tree and breaks module resolution. --network host
+# is required (dsh web binds 127.0.0.1 only for RCE safety). Only one noVNC
+# viewer at a time — every viewer runs fit-resize and they would fight.
 # =====================================================================
 
 # ---- Stage 1: reuse the already-built dsh app (compiled lib/ + web dist) ----
@@ -37,14 +41,24 @@ RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
  && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \
  && npm install -g pnpm@11.7.0 chrome-devtools-mcp@1.7.0
 
-# VNC stack: virtual display, VNC server, noVNC web bridge, a light WM.
-# Repoint apt at the internal Nexus mirror (no public egress on this host).
-# Serialize downloads: the mirror 502s under apt's default parallel fetches.
+# Display/VNC stack via the internal Nexus mirror; serialized downloads +
+# retries because the mirror 502s under apt's default parallel fetches.
 RUN sed -i 's|http://mirrors.aliyun.com/ubuntu/|http://10.1.7.49:8081/repository/apt-aliyun/|g' /etc/apt/sources.list \
  && apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
-      xvfb x11vnc fluxbox novnc websockify x11-utils curl \
+      tigervnc-standalone-server wmctrl novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
+
+# Desktop-fit helpers (see Dockerfile.prod for the rationale).
+COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
+COPY fit-resize.js /usr/share/novnc/fit-resize.js
+RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
+ && python3 -c "\
+html = open('/usr/share/novnc/vnc.html').read();\
+insert = '<script src=\"fit-resize.js\"></script>';\
+open('/usr/share/novnc/vnc.html', 'w').write(\
+    html if 'fit-resize.js' in html\
+    else html.replace('</body>', insert + '</body>'))"
 
 # The built dsh application.
 COPY --from=dshbuild /app /app
@@ -58,7 +72,7 @@ COPY entrypoint.prod.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV DSH_HOME=/root/.dsh
-# dsh web (3080), noVNC (6080), raw VNC (5900), Chrome CDP (9222)
-EXPOSE 3080 6080 5900 9222
+# dsh web (3080), noVNC (6080), resize sidecar (6081), raw VNC (5900), CDP (9222)
+EXPOSE 3080 6080 6081 5900 9222
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

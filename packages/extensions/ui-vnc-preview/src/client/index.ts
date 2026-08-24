@@ -25,9 +25,10 @@ import { PreviewPanel } from './PreviewPanel.tsx'
 
 /**
  * Default noVNC page for the local Chrome-over-noVNC setup. `resize=scale`
- * makes noVNC scale the whole remote desktop to fit the iframe (preserving
- * aspect ratio) instead of showing a 1:1 slice of the fixed-resolution Xvfb
- * canvas — so the picture follows the preview column width as it is dragged.
+ * keeps the stream smooth (the picture is scaled to fit, never flickers);
+ * the aio image's fit-resize.js + vnc-resize-sidecar follow the viewport
+ * (debounced) and set the Xvnc desktop to match, so the scaled picture
+ * fills the preview column without letterboxing.
  */
 const DEFAULT_VNC_URL = 'http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale'
 

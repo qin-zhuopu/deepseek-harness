@@ -9,6 +9,13 @@
 // letterboxing. Only one viewer should be open at a time.
 window.__fitResizeRan = 1;
 (function () {
+  // Hide noVNC's collapsed left-edge control bar (connection/settings/expand
+  // tabs) — the preview column doesn't need it and it eats frame width.
+  try {
+    var st = document.createElement('style');
+    st.textContent = '#noVNC_control_bar_anchor{display:none !important}';
+    document.head.appendChild(st);
+  } catch (e) { /* cosmetic only */ }
   var t = null;
   function go() {
     t = null;

@@ -35,7 +35,7 @@ COPY fit-resize.js /usr/share/novnc/fit-resize.js
 RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
  && python3 -c "\
 html = open('/usr/share/novnc/vnc.html').read();\
-insert = '<script src=\"fit-resize.js\"></script>';\
+insert = '<script src=\"fit-resize.js?v=3\"></script>';\
 open('/usr/share/novnc/vnc.html', 'w').write(\
     html if 'fit-resize.js' in html\
     else html.replace('</body>', insert + '</body>'))"

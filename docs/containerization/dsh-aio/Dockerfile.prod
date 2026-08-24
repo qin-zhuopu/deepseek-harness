@@ -45,7 +45,7 @@ RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
 # noVNC web bridge, a light WM, plus wmctrl for the Chrome re-fit watchdog.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      tigervnc-standalone-server wmctrl novnc websockify x11-utils curl \
+      tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
 
 # Desktop-fit helpers: the sidecar owns the desktop size (RFB SetDesktopSize

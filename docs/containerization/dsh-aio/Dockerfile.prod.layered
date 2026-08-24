@@ -1,0 +1,50 @@
+# =====================================================================
+# DeepSeek Harness — ALL-IN-ONE image (PRODUCTION, layered on an existing
+# aio image — no dsh rebuild)
+#
+# Use this when you CANNOT rebuild dsh:dev from source on the build host
+# (e.g. the npm registry is unreachable/slow) but you already have a
+# previously built aio image (here harbor.jereh.cn/base/dsh-aio:dev; swap
+# the FROM for your existing image). It layers the full PRODUCTION display
+# stack on top: Xvnc + resize sidecar + fit-resize + compiled-entry
+# entrypoint, exactly matching Dockerfile.prod stage 2.
+#
+# The apt step below pulls from the PUBLIC mirror (mirrors.aliyun.com), so
+# the BUILD host needs egress; on an air-gapped build host, replace it with
+# the internal Nexus mirror sed line from Dockerfile.prod.internal — or,
+# simplest: build this on an egress-capable host, push to harbor, and pull
+# on the air-gapped run host (how 10.1.17.58 is deployed).
+#
+# Build:  docker build -t dsh-aio:prod -f Dockerfile.prod.layered .
+# Run:    same as Dockerfile.prod (see below).
+# =====================================================================
+
+FROM harbor.jereh.cn/base/dsh-aio:dev
+
+# The base image's apt sources may point at the internal Nexus mirror; this
+# build host has public egress, so restore the public mirror first.
+RUN sed -i 's|http://10.1.7.49:8081/repository/apt-aliyun/|http://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      tigervnc-standalone-server wmctrl fluxbox \
+ && rm -rf /var/lib/apt/lists/*
+
+# Desktop-fit helpers (see Dockerfile.prod for the rationale).
+COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
+COPY fit-resize.js /usr/share/novnc/fit-resize.js
+RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
+ && python3 -c "\
+html = open('/usr/share/novnc/vnc.html').read();\
+insert = '<script src=\"fit-resize.js\"></script>';\
+open('/usr/share/novnc/vnc.html', 'w').write(\
+    html if 'fit-resize.js' in html\
+    else html.replace('</body>', insert + '</body>'))"
+
+# Supervisor: Xvnc + sidecar + Chrome fit + compiled-entry dsh.
+COPY entrypoint.prod.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# dsh web (3080), noVNC (6080), resize sidecar (6081), raw VNC (5900), CDP (9222)
+EXPOSE 3080 6080 6081 5900 9222
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

@@ -32,11 +32,23 @@ RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
  && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \
  && npm install -g pnpm@11.7.0 chrome-devtools-mcp@1.7.0
 
-# VNC stack: virtual display, VNC server, noVNC web bridge, a light WM.
+# Display/VNC stack: Xvnc (X server + VNC server with dynamic RandR sizes),
+# noVNC web bridge, a light WM, plus wmctrl for the Chrome re-fit watchdog.
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      xvfb x11vnc fluxbox novnc websockify x11-utils curl \
+      tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
+
+# Desktop-fit helpers (see Dockerfile.prod for the rationale).
+COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
+COPY fit-resize.js /usr/share/novnc/fit-resize.js
+RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
+ && python3 -c "\
+html = open('/usr/share/novnc/vnc.html').read();\
+insert = '<script src=\"fit-resize.js\"></script>';\
+open('/usr/share/novnc/vnc.html', 'w').write(\
+    html if 'fit-resize.js' in html\
+    else html.replace('</body>', insert + '</body>'))"
 
 # The built dsh application.
 COPY --from=dshbuild /app /app

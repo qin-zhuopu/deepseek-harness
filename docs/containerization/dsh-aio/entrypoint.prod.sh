@@ -21,6 +21,10 @@ set -e
 : "${CDP_PORT:=9222}"
 : "${DSH_PORT:=3080}"
 : "${BIND_ADDR:=127.0.0.1}"
+# Directory pre-registered as a workspace once dsh web is up, so a fresh
+# container opens with a ready workspace instead of an empty picker. Set
+# INIT_WORKSPACE= (empty) to skip.
+: "${INIT_WORKSPACE:=/root/workspace}"
 export DISPLAY=":${DISPLAY_NUM}"
 export PATH=/opt/node/bin:$PATH
 export DSH_HOME=/root/.dsh
@@ -97,6 +101,29 @@ log "CDP ready: $(curl -s http://${BIND_ADDR}:${CDP_PORT}/json/version | head -c
     sleep 0.5
   done
 ) &
+
+# Pre-register a workspace once dsh web answers, so a fresh container opens
+# with a ready workspace directory. Idempotent: workspace.create returns the
+# existing record (created:false) if the path is already registered. The
+# workspace registry only auto-discovers workspaces from prior sessions' cwd,
+# so without this a brand-new container shows an empty workspace picker.
+if [ -n "${INIT_WORKSPACE}" ]; then
+  (
+    mkdir -p "${INIT_WORKSPACE}"
+    for i in $(seq 1 60); do
+      curl -sf -o /dev/null "http://${BIND_ADDR}:${DSH_PORT}/" && break
+      sleep 1
+    done
+    UUID=$(cat /proc/sys/kernel/random/uuid)
+    body="{\"type\":\"client-request\",\"rpcId\":\"${UUID}\",\"method\":\"workspace.create\",\"payload\":{\"path\":\"${INIT_WORKSPACE}\"}}"
+    if curl -sf -X POST "http://${BIND_ADDR}:${DSH_PORT}/api/workspace.create" \
+         -H 'content-type: application/json' -d "${body}" >/dev/null 2>&1; then
+      log "workspace registered: ${INIT_WORKSPACE}"
+    else
+      log "workspace registration for ${INIT_WORKSPACE} failed (non-fatal)"
+    fi
+  ) &
+fi
 
 # PRODUCTION: run the compiled entry, not the tsx source dispatch.
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (compiled entry)"

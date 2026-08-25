@@ -22,6 +22,22 @@ import type { DraftAttachmentId, SessionInputResolver } from './input/contract.t
 import type { InputSubmitMode } from './contract/composer-submission.ts'
 
 /**
+ * Secure-context-tolerant UUID v4. `crypto.randomUUID` is (in browsers)
+ * available only in a secure context, so over plain http:// it is undefined;
+ * this falls back to `crypto.getRandomValues`, which insecure origins expose.
+ */
+function randomUuid(): string {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID()
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  view.setUint8(6, (view.getUint8(6) & 0x0f) | 0x40)
+  view.setUint8(8, (view.getUint8(8) & 0x3f) | 0x80)
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
+/**
  * The outward conversation face (`ctx.conversation`): the scope-addressed
  * verbs and the input registry other plugins may reach — and exactly what a
  * test fake must supply.
@@ -61,9 +77,11 @@ export interface IConversation {
 
 /** Create one browser-only draft descriptor; only its id enters input state. */
 function browserDraftAttachment(file: File): ComposerAttachment {
+  // `crypto.randomUUID` is secure-context-only in browsers; `randomUuid` falls
+  // back to `getRandomValues` so attachments still work over plain http://.
   return {
     kind: 'image',
-    id: crypto.randomUUID() as DraftAttachmentId,
+    id: randomUuid() as DraftAttachmentId,
     previewUrl: URL.createObjectURL(file),
     file,
   }

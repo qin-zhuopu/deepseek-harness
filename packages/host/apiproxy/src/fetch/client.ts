@@ -241,6 +241,23 @@ const INTERNAL_BASE = 'http://dsh.internal'
  * and observers subscribe via subscribeEnvelopes. The isomorphic point survives: an in-process
  * subclass whose doFetch is toFetchHandler(api).fetch never touches the network.
  */
+/**
+ * Secure-context-tolerant UUID v4: returns `crypto.randomUUID()` when the Web
+ * API is present, otherwise a v4 built on `crypto.getRandomValues()` (available
+ * on insecure origins, unlike `randomUUID`). Keeps rpcId minting working when
+ * dsh is served over plain `http://` on a non-localhost host.
+ */
+function randomUUIDCompat(): string {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID()
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  view.setUint8(6, (view.getUint8(6) & 0x0f) | 0x40)
+  view.setUint8(8, (view.getUint8(8) & 0x3f) | 0x80)
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export abstract class AbstractApiClient implements IApiClient {
   /** Instance-owned observation buffer (module-level state would leak across instances/tests). */
   private envelopeBatch: RpcMessage[] = []
@@ -296,8 +313,12 @@ export abstract class AbstractApiClient implements IApiClient {
   }
 
   protected mintRpcId(): RpcId {
-    // crypto.randomUUID is a Web API (browser + Node ≥19): keeps this base platform-neutral.
-    return RpcId(crypto.randomUUID())
+    // The Web-API `crypto.randomUUID` is gated to secure contexts: in a
+    // browser served over plain http:// (not localhost) it is undefined, which
+    // made every RPC — e.g. workspace.create from the "add workspace" button —
+    // fail with "crypto.randomUUID is not a function". Fall back to a v4 built
+    // on `crypto.getRandomValues`, which browsers expose on insecure origins.
+    return RpcId(randomUUIDCompat())
   }
 
   /**

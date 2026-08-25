@@ -142,7 +142,11 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 |------|--------|------|
 | `NR_API_KEY` | — | LLM 凭据;唯一必填项。 |
 | `SCREEN_GEOMETRY` | `576x1440x24` | 初始桌面尺寸(之后 sidecar 会把它跟视口对齐)。 |
-| `BIND_ADDR` | `127.0.0.1` | dsh web、websockify、CDP 的监听地址。 |
+| `BIND_ADDR` | `127.0.0.1` | websockify 与 CDP 的监听地址。**移不动 dsh web** —— 它拒绝任何非回环绑定（见下），那种场景请用 `FRONT_PORT`。 |
+| `FRONT_PORT` | — | 启用 `front-proxy.js`：一个可路由端口按路径分发到三个 loopback 服务。走反向代理时必须设置。留空 = 关闭。 |
+| `FRONT_BIND` | `0.0.0.0` | front-proxy 监听地址。 |
+| `VNC_PREFIX` | `/vnc` | front-proxy 下 noVNC 的路径前缀。 |
+| `TRUSTED_HOSTS` | — | 逗号/空格分隔的公网 authority，传给 `dsh web --trusted-host`。只要浏览器用公网域名访问容器就必须设，否则所有 `/api` 调用返回 403。 |
 | `INIT_WORKSPACE` | `/root/workspace` | 启动时创建并注册为工作区的目录,新容器一打开就是就绪状态。留空 = 跳过。 |
 | `VNC_PUBLIC_URL` | — | **浏览器**访问本容器 noVNC 的源(可带路径前缀),如 `https://dsh-vnc.example.org`。entrypoint 会追加 `/vnc.html?autoconnect=true&resize=scale`,并注入到下发的 `index.html` 里作为 `window.__DSH_VNC_PREVIEW_URL__`。留空 = 用插件的 `127.0.0.1:6080` 默认值。 |
 | `RESIZE_ENDPOINT` | — | 浏览器访问 resize sidecar 的 URL 或同源路径,渲染进 `vnc-config.js`。留空 = `fit-resize.js` 回退到 `<noVNC 主机>:6081`。 |
@@ -150,15 +154,25 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 | `SIDECAR_PORT` | `6081` | sidecar 端口。 |
 | `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | 端口与显示号覆盖(同一台跑第二个容器时有用)。 |
 
-### 反向代理后面(nginx-proxy)
+### 反向代理后面
 
-端口直接发布到宿主机时,两个面向浏览器的 URL 默认都是 `127.0.0.1` —— 只有浏览器
-跑在 Docker 宿主机上才对。走代理时浏览器到不了这些端口,所以要设
-`VNC_PUBLIC_URL` 和 `RESIZE_ENDPOINT`,这正是它们存在的理由。
+反向代理是通过容器的 bridge IP 连过来的,而 `dsh web` 有意只肯绑回环地址
+(`--host 0.0.0.0` 会直接以用法错误退出:那样「会把远程代码执行暴露到网络」),
+所以代理根本连不上它 —— `BIND_ADDR=0.0.0.0` 也解决不了,它只挪得动 websockify
+和 CDP。
 
-用两个子域名而不是一个域名加路径前缀:`vnc.html` 是按相对路径加载 `core/`、
-`app/` 这些资源的,若把 noVNC 挂在子路径下,这些请求会落到域名根、被路由到另一个
-服务。
+正解是 `FRONT_PORT`。它启动 `front-proxy.js` —— 唯一监听可路由地址的进程,按路径
+分发给仍留在 loopback 上的三个服务:
+
+| 路径 | 上游 |
+|------|------|
+| `/resize` | resize sidecar |
+| `/vnc`、`/vnc/*` | noVNC |
+| `/websockify` | noVNC 的 RFB socket(noVNC 会在源站根路径请求它) |
+| 其余 | dsh web |
+
+单端口同时意味着单 vhost、单源站,于是 `VNC_PUBLIC_URL` 和 `RESIZE_ENDPOINT` 变成
+同源路径,镜像根本不需要知道自己的公网域名:
 
 ```yaml
 services:
@@ -170,29 +184,27 @@ services:
     environment:
       NR_API_KEY: <你的 key>
       SCREEN_GEOMETRY: 576x1440x24
-      # nginx-proxy 是通过容器的 bridge IP 访问的,只听 loopback 就连不上。
-      # 这会把 dsh 的管控面暴露给所有能访问代理的人 —— 该 vhost 必须挂在
-      # 代理自己的鉴权(htpasswd/JWT)后面。
-      BIND_ADDR: 0.0.0.0
-      VNC_PUBLIC_URL: https://dsh-vnc.example.org
-      RESIZE_ENDPOINT: https://dsh-vnc.example.org/resize
+      FRONT_PORT: 8080
+      VNC_PUBLIC_URL: /vnc
+      RESIZE_ENDPOINT: /resize
+      # 不设这个,所有 /api 调用都会 403:front-proxy 原样转发 Host,而浏览器
+      # 信任栅栏只接受回环地址或已声明的 authority。这会把 dsh 管控面暴露给
+      # 所有能访问代理的人 —— 该 vhost 必须挂在代理自己的鉴权后面。
+      TRUSTED_HOSTS: dsh.example.org
+      VIRTUAL_HOST: dsh.example.org
+      VIRTUAL_PORT: 8080
       HTTPS_METHOD: noredirect
-      VIRTUAL_HOST_MULTIPORTS: |-
-        dsh.example.org:
-          "/":
-            port: 3080
-        dsh-vnc.example.org:
-          "/":
-            port: 6080
-          "/resize":
-            port: 6081
-    networks:
-      - proxy-net
 ```
 
-每个 path 都要显式写 `port`:nginx-proxy 的「默认端口」取自容器唯一暴露的端口,
-而本镜像暴露了五个,省略 `port` 会回退到 80 —— 那上面没有服务。WebSocket 升级
-不用额外配置,nginx-proxy 的模板已经转发了 `Upgrade`/`Connection`。
+只需路由一个端口,所以普通的 `VIRTUAL_HOST`/`VIRTUAL_PORT` 就够。这也让它在老版本
+代理上照样能用:`VIRTUAL_HOST_MULTIPORTS` 在 nginx-proxy 1.7 之前并不存在,1.3.0
+会直接静默忽略。WebSocket 升级不用额外配置,nginx-proxy 的模板已经转发了
+`Upgrade`/`Connection`。
+
+自己在前面再加一层代理时**不要改写 `Host`**。`dsh web` 的 `/api` 栅栏要求随请求
+附带的 `Origin` 必须等于 `Host` authority,把 `Host` 改写成回环地址会让所有浏览器
+POST 以 403 失败。应该改用 `TRUSTED_HOSTS` 声明公网 authority;既非回环、也未声明
+的 `Host` 仍会被拒 —— 那正是 DNS rebinding 防御在起作用。
 
 ## 部署备注(10.1.17.58,无公网)
 

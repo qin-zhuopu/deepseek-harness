@@ -48,7 +48,25 @@ set -e
 : "${RESIZE_ENDPOINT:=}"
 : "${SIDECAR_BIND:=${BIND_ADDR}}"
 : "${SIDECAR_PORT:=6081}"
+# front-proxy: one network-facing port fanning out to the three loopback
+# services (see front-proxy.js). Required behind a reverse proxy, because
+# `dsh web` refuses to bind 0.0.0.0 and a proxy reaches this container by its
+# bridge IP. With it running, everything else can stay on loopback and both
+# browser-facing URLs become same-origin paths:
+#   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize
+# Empty FRONT_PORT (the default) leaves the proxy off and the direct
+# port-publishing behaviour unchanged.
+: "${FRONT_PORT:=}"
+: "${FRONT_BIND:=0.0.0.0}"
+: "${VNC_PREFIX:=/vnc}"
+# Public authorities dsh web accepts on /api, space- or comma-separated
+# (e.g. "dsh.example.org"). front-proxy forwards Host verbatim, and the /api
+# browser-trust fence refuses any Host that is neither loopback nor declared
+# here — a DNS-rebinding defense, so this must be set, not worked around,
+# whenever the browser addresses this container by a public hostname.
+: "${TRUSTED_HOSTS:=}"
 export SIDECAR_BIND SIDECAR_PORT VNC_PORT
+export FRONT_PORT FRONT_BIND VNC_PREFIX DSH_PORT NOVNC_PORT
 export DISPLAY=":${DISPLAY_NUM}"
 export PATH=/opt/node/bin:$PATH
 export DSH_HOME=/root/.dsh
@@ -119,6 +137,12 @@ PY
   log "vnc preview url: ${VNC_PUBLIC_URL}/vnc.html"
 fi
 
+# The only listener on a routable address when enabled; everything it fronts
+# stays on loopback.
+if [ -n "${FRONT_PORT}" ]; then
+  node /usr/local/bin/front-proxy.js &
+fi
+
 # Size the Chrome window to the actual desktop. --start-maximized is
 # unreliable under a bare WM (Chrome comes up as a ~10x10 window). Deriving
 # --window-size from SCREEN_GEOMETRY makes Chrome fill the desktop.
@@ -183,7 +207,17 @@ if [ -n "${INIT_WORKSPACE}" ]; then
   ) &
 fi
 
+# One repeatable --trusted-host per declared authority. Built as an array so
+# the flags stay separate arguments under `set -u`-safe expansion.
+TRUST_ARGS=()
+if [ -n "${TRUSTED_HOSTS}" ]; then
+  for authority in $(printf '%s' "${TRUSTED_HOSTS}" | tr ',' ' '); do
+    TRUST_ARGS+=(--trusted-host "${authority}")
+  done
+  log "trusted hosts: ${TRUSTED_HOSTS}"
+fi
+
 # PRODUCTION: run the compiled entry, not the tsx source dispatch.
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (compiled entry)"
 cd /app
-exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}"
+exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

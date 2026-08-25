@@ -159,7 +159,11 @@ Open:
 |----------|---------|---------|
 | `NR_API_KEY` | — | LLM credential; the only required one. |
 | `SCREEN_GEOMETRY` | `576x1440x24` | Initial desktop size (the sidecar resizes it to the viewport afterwards). |
-| `BIND_ADDR` | `127.0.0.1` | Listen address for dsh web, websockify and CDP. |
+| `BIND_ADDR` | `127.0.0.1` | Listen address for websockify and CDP. **Does not move dsh web**, which refuses any non-loopback bind (see below); use `FRONT_PORT` for that. |
+| `FRONT_PORT` | — | Enables `front-proxy.js`: one routable port that fans out to all three loopback services. Required behind a reverse proxy. Empty = off. |
+| `FRONT_BIND` | `0.0.0.0` | front-proxy listen address. |
+| `VNC_PREFIX` | `/vnc` | Path prefix under which front-proxy serves noVNC. |
+| `TRUSTED_HOSTS` | — | Comma/space-separated public authorities passed to `dsh web --trusted-host`. Required whenever a browser addresses the container by a public hostname, or every `/api` call answers 403. |
 | `INIT_WORKSPACE` | `/root/workspace` | Directory created and registered as a workspace at startup so a fresh container opens ready. Empty = skip. |
 | `VNC_PUBLIC_URL` | — | Origin (optionally with a path prefix) where the **browser** reaches this container's noVNC, e.g. `https://dsh-vnc.example.org`. The entrypoint appends `/vnc.html?autoconnect=true&resize=scale` and injects it into the served `index.html` as `window.__DSH_VNC_PREVIEW_URL__`. Empty = the plugin's `127.0.0.1:6080` default. |
 | `RESIZE_ENDPOINT` | — | URL or same-origin path where the browser reaches the resize sidecar. Rendered into `vnc-config.js`. Empty = `fit-resize.js` falls back to `<noVNC host>:6081`. |
@@ -167,16 +171,28 @@ Open:
 | `SIDECAR_PORT` | `6081` | Sidecar port. |
 | `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | Port and display overrides (useful for a second container on one host). |
 
-### Behind a reverse proxy (nginx-proxy)
+### Behind a reverse proxy
 
-With ports published straight to the host, both browser-facing URLs default to
-`127.0.0.1`, which is correct only when the browser runs on the Docker host.
-Behind a proxy the browser cannot reach those ports, so set `VNC_PUBLIC_URL`
-and `RESIZE_ENDPOINT` — that is what they exist for.
+A reverse proxy connects to the container's bridge IP, and `dsh web`
+deliberately refuses to bind anything but loopback (`--host 0.0.0.0` exits with
+a usage error: it "would expose remote code execution to the network"), so the
+proxy cannot reach it directly — and `BIND_ADDR=0.0.0.0` does not change that,
+it only moves websockify and CDP.
 
-Two hostnames rather than one host with path prefixes: `vnc.html` loads
-`core/`, `app/` and friends by relative path, so mounting noVNC under a
-sub-path would send those requests to the other service at the domain root.
+`FRONT_PORT` is the answer. It starts `front-proxy.js`, the one process that
+listens on a routable address, and routes by path to the three services that
+stay on loopback:
+
+| Path | Upstream |
+|------|----------|
+| `/resize` | resize sidecar |
+| `/vnc`, `/vnc/*` | noVNC |
+| `/websockify` | noVNC (its RFB socket, which noVNC requests at the origin root) |
+| everything else | dsh web |
+
+One port also means one vhost and one origin, so `VNC_PUBLIC_URL` and
+`RESIZE_ENDPOINT` become same-origin paths and the image never needs to know
+its own public hostname:
 
 ```yaml
 services:
@@ -188,31 +204,30 @@ services:
     environment:
       NR_API_KEY: <your-key>
       SCREEN_GEOMETRY: 576x1440x24
-      # nginx-proxy reaches the container by its bridge IP, so loopback-only
-      # listeners are unreachable. This opens the dsh control plane to
-      # anything that can reach the proxy — keep the vhost behind the proxy's
-      # own auth (htpasswd/JWT).
-      BIND_ADDR: 0.0.0.0
-      VNC_PUBLIC_URL: https://dsh-vnc.example.org
-      RESIZE_ENDPOINT: https://dsh-vnc.example.org/resize
+      FRONT_PORT: 8080
+      VNC_PUBLIC_URL: /vnc
+      RESIZE_ENDPOINT: /resize
+      # Without this every /api call answers 403: front-proxy forwards Host
+      # verbatim, and the browser-trust fence accepts only loopback or a
+      # declared authority. This exposes the dsh control plane to anything
+      # that reaches the proxy — keep the vhost behind the proxy's own auth.
+      TRUSTED_HOSTS: dsh.example.org
+      VIRTUAL_HOST: dsh.example.org
+      VIRTUAL_PORT: 8080
       HTTPS_METHOD: noredirect
-      VIRTUAL_HOST_MULTIPORTS: |-
-        dsh.example.org:
-          "/":
-            port: 3080
-        dsh-vnc.example.org:
-          "/":
-            port: 6080
-          "/resize":
-            port: 6081
-    networks:
-      - proxy-net
 ```
 
-Spell out `port` on every path: nginx-proxy's "default port" is the container's
-single exposed port, and this image exposes five, so an omitted `port` falls
-back to 80 where nothing listens. WebSocket upgrade needs no extra
-configuration — nginx-proxy's template forwards `Upgrade`/`Connection` already.
+Plain `VIRTUAL_HOST`/`VIRTUAL_PORT` is enough because there is one port to
+route. That also keeps this working on older proxies: `VIRTUAL_HOST_MULTIPORTS`
+does not exist before nginx-proxy 1.7, and 1.3.0 ignores it silently. Nothing
+extra is needed for the WebSocket upgrade — nginx-proxy's template already
+forwards `Upgrade`/`Connection`.
+
+Do not rewrite `Host` when putting your own proxy in front. `dsh web`'s `/api`
+fence requires an attached `Origin` to equal the `Host` authority, so a
+loopback-rewritten `Host` fails every browser POST with 403. Declare the public
+authority in `TRUSTED_HOSTS` instead; a `Host` that is neither loopback nor
+declared is still refused, which is the DNS-rebinding defense doing its job.
 
 ## Deployment note (10.1.17.58, air-gapped)
 

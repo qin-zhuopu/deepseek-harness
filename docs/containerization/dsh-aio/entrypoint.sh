@@ -35,7 +35,20 @@ set -e
 : "${RESIZE_ENDPOINT:=}"
 : "${SIDECAR_BIND:=${BIND_ADDR}}"
 : "${SIDECAR_PORT:=6081}"
+# front-proxy: one network-facing port fanning out to the three loopback
+# services (see front-proxy.js and entrypoint.prod.sh for the full rationale).
+# Required behind a reverse proxy, because `dsh web` refuses to bind 0.0.0.0.
+#   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize
+# Empty FRONT_PORT (the default) leaves the proxy off.
+: "${FRONT_PORT:=}"
+: "${FRONT_BIND:=0.0.0.0}"
+: "${VNC_PREFIX:=/vnc}"
+# Public authorities dsh web accepts on /api, space- or comma-separated.
+# front-proxy forwards Host verbatim and the /api browser-trust fence refuses
+# any Host that is neither loopback nor declared here (DNS-rebinding defense).
+: "${TRUSTED_HOSTS:=}"
 export SIDECAR_BIND SIDECAR_PORT VNC_PORT
+export FRONT_PORT FRONT_BIND VNC_PREFIX DSH_PORT NOVNC_PORT
 export DISPLAY=":${DISPLAY_NUM}"
 export PATH=/opt/node/bin:$PATH
 export DSH_HOME=/root/.dsh
@@ -99,6 +112,12 @@ PY
   log "vnc preview url: ${VNC_PUBLIC_URL}/vnc.html"
 fi
 
+# The only listener on a routable address when enabled; everything it fronts
+# stays on loopback.
+if [ -n "${FRONT_PORT}" ]; then
+  node /usr/local/bin/front-proxy.js &
+fi
+
 log "Google Chrome (CDP ${BIND_ADDR}:${CDP_PORT}, window ${SCREEN_W}x${SCREEN_H})"
 google-chrome \
   --no-sandbox --disable-gpu --disable-dev-shm-usage \
@@ -156,7 +175,16 @@ if [ -n "${INIT_WORKSPACE}" ]; then
   ) &
 fi
 
+# One repeatable --trusted-host per declared authority.
+TRUST_ARGS=()
+if [ -n "${TRUSTED_HOSTS}" ]; then
+  for authority in $(printf '%s' "${TRUSTED_HOSTS}" | tr ',' ' '); do
+    TRUST_ARGS+=(--trusted-host "${authority}")
+  done
+  log "trusted hosts: ${TRUSTED_HOSTS}"
+fi
+
 # DEV: run the tsx source dispatch (transpiles TypeScript at runtime).
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (tsx source dispatch)"
 cd /app
-exec pnpm dsh web --no-open --port "${DSH_PORT}"
+exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

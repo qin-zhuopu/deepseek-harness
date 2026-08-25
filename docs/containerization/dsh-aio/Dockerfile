@@ -43,6 +43,7 @@ RUN apt-get update \
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
 COPY fit-resize.js /usr/share/novnc/fit-resize.js
 COPY patch-vnc-html.py /usr/local/bin/patch-vnc-html.py
+COPY front-proxy.js /usr/local/bin/front-proxy.js
 RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
  && python3 /usr/local/bin/patch-vnc-html.py /usr/share/novnc/vnc.html
 
@@ -58,7 +59,8 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV DSH_HOME=/root/.dsh
-# dsh web (3080), noVNC (6080), raw VNC (5900), Chrome CDP (9222)
-EXPOSE 3080 6080 5900 9222
+# dsh web (3080), noVNC (6080), resize sidecar (6081), raw VNC (5900),
+# CDP (9222), front-proxy (8080, only when FRONT_PORT is set)
+EXPOSE 3080 6080 6081 5900 9222 8080
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

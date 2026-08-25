@@ -1,0 +1,64 @@
+# dsh-aio-webapp — the aio image with a ready-to-code React app baked in.
+#
+# The plain aio image pre-registers an EMPTY workspace: a fresh container opens
+# with a usable workspace directory but nothing in it. This variant bakes a
+# scaffolded Vite + React + TypeScript project, its node_modules, and a first
+# commit into the image, and its entrypoint starts the dev server and points
+# the container Chrome at it. Opening the container is enough to be coding.
+#
+# Layered on the published aio image, so this never rebuilds dsh itself
+# (see Dockerfile.prod.layered for why that matters).
+#
+# Build:
+#   docker build -t dsh-aio:webapp -f Dockerfile.webapp .
+# Run (direct ports):
+#   docker run -d --name dsh-webapp --network host --shm-size=1g \
+#     -e NR_API_KEY=<key> dsh-aio:webapp
+FROM harbor.jereh.cn/base/dsh-aio:prod
+
+# The project lives at the same path the plain image registers as a workspace,
+# so the workspace picker and INIT_WORKSPACE keep working unchanged.
+ENV APP_DIR=/root/workspace
+
+# Scaffold from the official template rather than carrying a copy in this
+# repo: a vendored duplicate silently drifts from upstream. create-vite is
+# pinned so a rebuild produces the same project.
+#
+# --yes keeps npm from prompting for the one-off create-vite install, and
+# `.` scaffolds in place (the directory already exists as the workspace).
+RUN mkdir -p "${APP_DIR}" \
+ && cd "${APP_DIR}" \
+ && npm --yes create vite@9.2.0 . -- --template react-ts \
+ && npm install \
+ && npm run build \
+ && rm -rf dist
+
+# Agent-facing project brief. Kept in the image (not generated at runtime) so
+# it is reviewable here and version-controlled with the Dockerfile.
+COPY webapp/CLAUDE.md ${APP_DIR}/CLAUDE.md
+
+# One initial commit, so an agent starts on a clean tree and can diff its own
+# work. git identity is set locally to keep the commit from depending on
+# ambient config that does not exist in a fresh container.
+RUN cd "${APP_DIR}" \
+ && git init -q \
+ && git config user.email dsh-aio@localhost \
+ && git config user.name "dsh-aio image" \
+ && git add -A \
+ && git commit -qm "chore: scaffold React + Vite + TypeScript app" \
+ && git log --oneline -1
+
+# Supervisor that additionally starts the dev server and opens it in Chrome.
+# The base image's entrypoint moves aside under a stable name; the wrapper
+# exec's it last so it still ends up as PID 1.
+COPY cdp-navigate.js /usr/local/bin/cdp-navigate.js
+COPY entrypoint.webapp.sh /usr/local/bin/entrypoint.webapp.sh
+RUN mv /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.aio.sh \
+ && cp /usr/local/bin/entrypoint.webapp.sh /usr/local/bin/entrypoint.sh \
+ && chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/entrypoint.aio.sh
+
+# dsh web (3080), noVNC (6080), resize sidecar (6081), raw VNC (5900),
+# CDP (9222), front-proxy (8080), Vite dev server (5173)
+EXPOSE 3080 6080 6081 5900 9222 8080 5173
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

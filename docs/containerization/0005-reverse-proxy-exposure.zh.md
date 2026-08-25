@@ -195,7 +195,15 @@ resize sidecar —— 而不只是请求被路由到了。
 任何页面。
 
 曾观察到在做这些事的那个容器,是之后手工搭起来的。用这个镜像起的全新容器里,
-`/root/workspace` 条目数为零、不是 git 仓库,5173 上也没有任何监听。
+`/root/workspace` 条目数为零、不是 git 仓库,5173 上也没有任何监听。对那个手工搭的
+容器执行 `docker diff`,项目显示为 `A /root/workspace/...` —— 属于容器层的新增,容器
+一删就没了。
+
+`Dockerfile.webapp` 补上的正是这个缺口:一个独立变体,把脚手架应用、它的
+`node_modules` 和一条初始提交烧进镜像,并启动 dev server 以及一个已打开该页面的
+Chrome 标签页。参见
+[0004](0004-dockerfile-variants.zh.md#webapp-变体上来就能写代码的容器)。上面那段
+描述对其余每个变体依然成立。
 
 ## 相关
 

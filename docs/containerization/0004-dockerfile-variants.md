@@ -26,6 +26,7 @@ varied along three axes:
 | Production, public build host, full build | `dsh-aio/Dockerfile.prod` (on top of `dsh:dev`) |
 | Production, air-gapped build host, full build | `dsh-aio/Dockerfile.prod.internal` (on top of an internal `dsh:dev`) |
 | Production, but **cannot rebuild `dsh:dev`** (npm registry unreachable / too slow) — you already have an aio image | `dsh-aio/Dockerfile.prod.layered` ← *this is how 10.1.17.58 is deployed* |
+| You want a container that is **already coding**: a React app scaffolded, dev server up, Chrome on the page | `dsh-aio/Dockerfile.webapp` |
 
 ## The full inventory
 
@@ -38,6 +39,7 @@ varied along three axes:
 | 5 | `dsh-aio/Dockerfile.prod` | aio | public | **prod** | `dsh:dev` |
 | 6 | `dsh-aio/Dockerfile.prod.internal` | aio | internal | **prod** | `dsh:dev` |
 | 7 | `dsh-aio/Dockerfile.prod.layered` | aio | public* | **prod** | existing aio image |
+| 8 | `dsh-aio/Dockerfile.webapp` | aio + baked app | public | **prod** | existing aio image |
 
 \* the layered file's apt step pulls from the public mirror; on an air-gapped
 build host swap in the internal Nexus `sed` line from `.prod.internal`.
@@ -170,6 +172,40 @@ Open:
 | `SIDECAR_BIND` | `= BIND_ADDR` | Sidecar listen address. |
 | `SIDECAR_PORT` | `6081` | Sidecar port. |
 | `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | Port and display overrides (useful for a second container on one host). |
+
+### The webapp variant: a container that is already coding
+
+Every other variant registers an **empty** workspace: the picker is populated
+but the directory has nothing in it. `Dockerfile.webapp` bakes a working project
+into the image instead, so opening the container is enough to start:
+
+- a Vite + React + TypeScript app at `/root/workspace`, dependencies installed,
+  on one initial commit with a clean tree;
+- `CLAUDE.md` describing the project and its environment;
+- the Vite dev server started on `127.0.0.1:5173` by the entrypoint;
+- the container Chrome already navigated to that URL.
+
+```bash
+cd docs/containerization/dsh-aio
+docker build -t dsh-aio:webapp -f Dockerfile.webapp .
+
+docker run -d --name dsh-webapp --network host --shm-size=1g \
+  -e NR_API_KEY=<your-key> dsh-aio:webapp
+```
+
+It layers on the published aio image, so it never rebuilds dsh. The project is
+scaffolded during the build with a pinned `create-vite` rather than vendored
+into this repo, which keeps a copied template from drifting from upstream. Cost
+is size: ~6.2GB versus ~5.8GB, almost all of it `node_modules`.
+
+Extra variables: `VITE_PORT` (default `5173`) and `OPEN_APP=0` to leave Chrome
+on `about:blank` while still starting the dev server.
+
+The entrypoint wraps the base one rather than replacing it — the base script is
+moved to `entrypoint.aio.sh` and `exec`'d last, so it still becomes PID 1 and
+the display stack, dsh web, and workspace registration behave identically.
+`cdp-navigate.js` drives the existing Chrome tab over CDP; it reuses the
+`about:blank` target instead of `/json/new`, which would leave a stray tab.
 
 ### Behind a reverse proxy
 

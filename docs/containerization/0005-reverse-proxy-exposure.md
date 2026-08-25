@@ -224,7 +224,15 @@ server, and does not drive Chrome to any page.
 
 A container observed doing those things had them done by hand afterwards. In a
 fresh container from this image, `/root/workspace` has zero entries, is not a
-git repository, and nothing listens on 5173.
+git repository, and nothing listens on 5173. `docker diff` on the hand-built
+container showed the project as `A /root/workspace/...` — added in the container
+layer, gone with the container.
+
+That gap is what `Dockerfile.webapp` now closes: a separate variant that bakes
+the scaffolded app, its `node_modules`, and a first commit into the image and
+starts the dev server plus a Chrome tab on it. See
+[0004](0004-dockerfile-variants.md#the-webapp-variant-a-container-that-is-already-coding).
+The statement above still describes every other variant.
 
 ## Related
 

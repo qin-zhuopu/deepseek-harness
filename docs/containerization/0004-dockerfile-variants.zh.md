@@ -23,6 +23,7 @@
 | 生产,公网构建机,完整构建 | `dsh-aio/Dockerfile.prod`(基于 `dsh:dev`) |
 | 生产,内网构建机,完整构建 | `dsh-aio/Dockerfile.prod.internal`(基于内网 `dsh:dev`) |
 | 生产,但**无法重建 `dsh:dev`**(npm 源不通/太慢),手上已有 aio 镜像 | `dsh-aio/Dockerfile.prod.layered` ← *10.1.17.58 就是这么部署的* |
+| 想要一个**上来就能写代码**的容器:React 项目已脚手架、dev server 已起、Chrome 已打开页面 | `dsh-aio/Dockerfile.webapp` |
 
 ## 完整清单
 
@@ -35,6 +36,7 @@
 | 5 | `dsh-aio/Dockerfile.prod` | aio | 公网 | **生产** | `dsh:dev` |
 | 6 | `dsh-aio/Dockerfile.prod.internal` | aio | 内网 | **生产** | `dsh:dev` |
 | 7 | `dsh-aio/Dockerfile.prod.layered` | aio | 公网* | **生产** | 现成 aio 镜像 |
+| 8 | `dsh-aio/Dockerfile.webapp` | aio + 内置项目 | 公网 | **生产** | 现成 aio 镜像 |
 
 \* 分层版的 apt 走公网源;内网构建机请换成 `.prod.internal` 里的内网 Nexus `sed` 行。
 
@@ -153,6 +155,37 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 | `SIDECAR_BIND` | `= BIND_ADDR` | sidecar 监听地址。 |
 | `SIDECAR_PORT` | `6081` | sidecar 端口。 |
 | `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | 端口与显示号覆盖(同一台跑第二个容器时有用)。 |
+
+### webapp 变体:上来就能写代码的容器
+
+其余每个变体注册的都是**空的**工作区:选择器里有条目,但目录里什么都没有。
+`Dockerfile.webapp` 改为把一个可用项目烧进镜像,于是打开容器就能直接开工:
+
+- `/root/workspace` 下一个 Vite + React + TypeScript 应用,依赖已装好,一条初始
+  提交、工作树干净;
+- `CLAUDE.md`,说明项目本身与它所处的环境;
+- entrypoint 已在 `127.0.0.1:5173` 启动 Vite dev server;
+- 容器内的 Chrome 已经导航到该地址。
+
+```bash
+cd docs/containerization/dsh-aio
+docker build -t dsh-aio:webapp -f Dockerfile.webapp .
+
+docker run -d --name dsh-webapp --network host --shm-size=1g \
+  -e NR_API_KEY=<你的 key> dsh-aio:webapp
+```
+
+它分层在已发布的 aio 镜像之上,所以不会重建 dsh。项目是在构建时用固定版本的
+`create-vite` 现场生成的,而不是把模板抄进本仓库 —— 抄一份副本会悄悄与上游漂移。
+代价是体积:约 6.2GB 对约 5.8GB,差的几乎全是 `node_modules`。
+
+额外变量:`VITE_PORT`(默认 `5173`);`OPEN_APP=0` 可让 Chrome 停在 `about:blank`,
+但 dev server 照常启动。
+
+这个 entrypoint 是包装基础 entrypoint 而非替换它 —— 基础脚本被移到
+`entrypoint.aio.sh` 并在最后 `exec`,所以它依然成为 PID 1,显示栈、dsh web、工作区
+注册的行为与原来完全一致。`cdp-navigate.js` 通过 CDP 驱动那个已存在的 Chrome 标签
+页;它复用 `about:blank` 目标而不是 `/json/new`,后者会多留一个空白页。
 
 ### 反向代理后面
 

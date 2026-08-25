@@ -4,6 +4,23 @@ import { MessageId, type CallId } from './brand.ts'
 import { deepFreeze } from './call-config.ts'
 import type { ContentBlock, StreamChunk, ToolResultBlock } from './types.ts'
 
+/**
+ * Secure-context-tolerant UUID v4. This module is bundled into the browser
+ * (createMessage runs client-side), where `crypto.randomUUID` exists only in a
+ * secure context: over plain http:// on a non-localhost host it is undefined.
+ * `crypto.getRandomValues` is available on insecure origins, so fall back to it.
+ */
+function randomUuid(): string {
+  const cryptoApi = globalThis.crypto
+  if (typeof cryptoApi?.randomUUID === 'function') return cryptoApi.randomUUID()
+  const bytes = cryptoApi.getRandomValues(new Uint8Array(16))
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  view.setUint8(6, (view.getUint8(6) & 0x0f) | 0x40)
+  view.setUint8(8, (view.getUint8(8) & 0x3f) | 0x80)
+  const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 /** Provider/model identity and adapter-private replay data for an assistant message. */
 export interface AssistantProvenance {
   /** Provider route that produced the message. */
@@ -180,7 +197,7 @@ export function createMessage<T extends NewMessage>(
 ): T & Pick<Message, 'id'> {
   return freezeMessage({
     ...input,
-    id: MessageId(crypto.randomUUID()),
+    id: MessageId(randomUuid()),
   })
 }
 

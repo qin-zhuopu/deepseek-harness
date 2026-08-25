@@ -69,7 +69,7 @@ $ docker exec jr-nginx-proxy grep -c VIRTUAL_PATH /app/nginx.tmpl
 
 ## front-proxy:单端口、单源站
 
-`front-proxy.js`(在 `dsh-aio/` 下)是唯一绑定可路由地址的进程;它前置的一切都留在
+`front-proxy.js`(在 `docker/dsh-aio/` 下)是唯一绑定可路由地址的进程;它前置的一切都留在
 loopback 上,这比把每个服务都挪到 `0.0.0.0` 暴露面更小。
 
 | 路径 | 上游 |

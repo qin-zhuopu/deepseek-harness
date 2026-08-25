@@ -6,7 +6,7 @@ Status: in use (the layered prod image runs on the 10.1.17.58 app server)
 
 ## Summary
 
-The repo carries **7 Dockerfiles** for **2 logical images** — the `dsh` web
+The repo carries **8 Dockerfiles** for **2 logical images** — the `dsh` web
 image (app only) and the `aio` all-in-one image (app + Chrome + noVNC) —
 varied along three axes:
 
@@ -21,25 +21,25 @@ varied along three axes:
 
 | Your situation | Use |
 |---|---|
-| Public egress, iterating on dsh source | `Dockerfile` (repo root) → `dsh:dev`, then `dsh-aio/Dockerfile` |
-| Air-gapped build host, building from source | `Dockerfile.internal` → `dsh:dev`, then `dsh-aio/Dockerfile.internal` |
-| Production, public build host, full build | `dsh-aio/Dockerfile.prod` (on top of `dsh:dev`) |
-| Production, air-gapped build host, full build | `dsh-aio/Dockerfile.prod.internal` (on top of an internal `dsh:dev`) |
-| Production, but **cannot rebuild `dsh:dev`** (npm registry unreachable / too slow) — you already have an aio image | `dsh-aio/Dockerfile.prod.layered` ← *this is how 10.1.17.58 is deployed* |
-| You want a container that is **already coding**: a React app scaffolded, dev server up, Chrome on the page | `dsh-aio/Dockerfile.webapp` |
+| Public egress, iterating on dsh source | `docker/dsh/Dockerfile` → `dsh:dev`, then `docker/dsh-aio/Dockerfile` |
+| Air-gapped build host, building from source | `docker/dsh/Dockerfile.internal` → `dsh:dev`, then `docker/dsh-aio/Dockerfile.internal` |
+| Production, public build host, full build | `docker/dsh-aio/Dockerfile.prod` (on top of `dsh:dev`) |
+| Production, air-gapped build host, full build | `docker/dsh-aio/Dockerfile.prod.internal` (on top of an internal `dsh:dev`) |
+| Production, but **cannot rebuild `dsh:dev`** (npm registry unreachable / too slow) — you already have an aio image | `docker/dsh-aio/Dockerfile.prod.layered` ← *this is how 10.1.17.58 is deployed* |
+| You want a container that is **already coding**: a React app scaffolded, dev server up, Chrome on the page | `docker/dsh-aio/Dockerfile.webapp` |
 
 ## The full inventory
 
-| # | File | Image | Network | Mode | Build base |
-|---|------|-------|---------|------|------------|
-| 1 | `Dockerfile` (root) | dsh | public | dev | `node:24` |
-| 2 | `Dockerfile.internal` (root) | dsh | internal | dev | `harbor…/node:24` |
-| 3 | `dsh-aio/Dockerfile` | aio | public | dev | `dsh:dev` |
-| 4 | `dsh-aio/Dockerfile.internal` | aio | internal | dev | `dsh:dev` |
-| 5 | `dsh-aio/Dockerfile.prod` | aio | public | **prod** | `dsh:dev` |
-| 6 | `dsh-aio/Dockerfile.prod.internal` | aio | internal | **prod** | `dsh:dev` |
-| 7 | `dsh-aio/Dockerfile.prod.layered` | aio | public* | **prod** | existing aio image |
-| 8 | `dsh-aio/Dockerfile.webapp` | aio + baked app | public | **prod** | existing aio image |
+| # | File | Image | Network | Mode | Build base | Harbor |
+|---|------|-------|---------|------|------------|--------|
+| 1 | `docker/dsh/Dockerfile` | dsh | public | dev | `node:24` | — (rebase source only) |
+| 2 | `docker/dsh/Dockerfile.internal` | dsh | internal | dev | `harbor…/node:24` | — (rebase source only) |
+| 3 | `docker/dsh-aio/Dockerfile` | aio | public | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 4 | `docker/dsh-aio/Dockerfile.internal` | aio | internal | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 5 | `docker/dsh-aio/Dockerfile.prod` | aio | public | **prod** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 6 | `docker/dsh-aio/Dockerfile.prod.internal` | aio | internal | **prod** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 7 | `docker/dsh-aio/Dockerfile.prod.layered` | aio | public* | **prod** | existing aio image | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 8 | `docker/dsh-aio/Dockerfile.webapp` | aio + baked app | public | **prod** | existing aio image | `harbor.jereh.cn/base/dsh-aio:webapp` |
 
 \* the layered file's apt step pulls from the public mirror; on an air-gapped
 build host swap in the internal Nexus `sed` line from `.prod.internal`.
@@ -70,7 +70,7 @@ apt's default parallel fetches).
 
 ## Axis 2 — dev vs prod
 
-Two entrypoints under `dsh-aio/`, differing only in the dsh launch line:
+Two entrypoints under `docker/dsh-aio/`, differing only in the dsh launch line:
 
 - `entrypoint.sh` (dev) — `exec pnpm dsh web …` =
   `node --import tsx/esm apps/cli/src/bin.ts`: runtime TypeScript transpile,
@@ -117,20 +117,34 @@ viewers fight over the desktop size (shared-X oscillation).
 ## Build & run
 
 ### dsh (needed by all full-build aio variants)
+`COPY . .` needs the **repo root** as the build context, so build from here
+(not from inside `docker/dsh/`), naming the Dockerfile explicitly:
 ```bash
-docker build -t dsh:dev -f Dockerfile .            # public
-docker build -t dsh:dev -f Dockerfile.internal .   # internal
+docker build -t dsh:dev -f docker/dsh/Dockerfile .            # public
+docker build -t dsh:dev -f docker/dsh/Dockerfile.internal .   # internal
 ```
 
 ### aio
+aio's Dockerfiles only `COPY` their sibling files (entrypoints, sidecar, …),
+so their context is the `docker/dsh-aio/` directory itself:
 ```bash
-cd docs/containerization/dsh-aio
+cd docker/dsh-aio
 
 docker build -t dsh-aio:dev  -f Dockerfile .                 # public dev
 docker build -t dsh-aio:prod -f Dockerfile.prod .            # public prod (full)
 docker build -t dsh-aio:prod -f Dockerfile.prod.layered .    # prod, no dsh rebuild
 docker build -t dsh-aio:dev  -f Dockerfile.internal .        # internal dev
 docker build -t dsh-aio:prod -f Dockerfile.prod.internal .   # internal prod
+
+docker build -t dsh-aio:webapp -f Dockerfile.webapp .        # webapp variant
+
+# Push to Harbor under the tag that /deploys consume (see the table above).
+docker tag dsh-aio:dev    harbor.jereh.cn/base/dsh-aio:dev
+docker tag dsh-aio:prod   harbor.jereh.cn/base/dsh-aio:prod
+docker tag dsh-aio:webapp harbor.jereh.cn/base/dsh-aio:webapp
+docker push harbor.jereh.cn/base/dsh-aio:dev
+docker push harbor.jereh.cn/base/dsh-aio:prod
+docker push harbor.jereh.cn/base/dsh-aio:webapp
 
 docker run -d --name dsh-aio --network host --shm-size=1g \
   -e NR_API_KEY=<your-key> -e SCREEN_GEOMETRY=576x1440x24 dsh-aio:prod
@@ -186,8 +200,10 @@ into the image instead, so opening the container is enough to start:
 - the container Chrome already navigated to that URL.
 
 ```bash
-cd docs/containerization/dsh-aio
+cd docker/dsh-aio
 docker build -t dsh-aio:webapp -f Dockerfile.webapp .
+docker tag dsh-aio:webapp harbor.jereh.cn/base/dsh-aio:webapp
+docker push harbor.jereh.cn/base/dsh-aio:webapp
 
 docker run -d --name dsh-webapp --network host --shm-size=1g \
   -e NR_API_KEY=<your-key> dsh-aio:webapp
@@ -267,7 +283,7 @@ declared is still refused, which is the DNS-rebinding defense doing its job.
 
 ## Deployment note (10.1.17.58, air-gapped)
 
-1. On an egress-capable host (WSL dev box): `docker build -f
+1. On an egress-capable host (WSL dev box): `cd docker/dsh-aio && docker build -f
    Dockerfile.prod.layered -t dsh-aio:prod .` (or the full
    `Dockerfile.prod`), push to `harbor.jereh.cn/base/dsh-aio:prod`.
 2. On 10.1.17.58: `docker pull`, then run with `--network host`.

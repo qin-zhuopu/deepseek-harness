@@ -210,11 +210,11 @@ in-container agent then autonomously calling the `mcp__chrome__*` tools to open
 Baidu, with logs captured throughout and the verdict read back from those logs.
 
 The image sources and the verification harness live in
-[`dsh-aio/`](dsh-aio/) next to this note: the
-[`Dockerfile`](dsh-aio/Dockerfile), the supervisor
-[`entrypoint.sh`](dsh-aio/entrypoint.sh), the baked
-[`cordis.patch.yml`](dsh-aio/cordis.patch.yml), and
-[`verify-e2e.sh`](dsh-aio/verify-e2e.sh). The harness: (1) restarts `dsh-aio` with `-e
+[`docker/dsh-aio/`](../../docker/dsh-aio/): the
+[`Dockerfile`](../../docker/dsh-aio/Dockerfile), the supervisor
+[`entrypoint.sh`](../../docker/dsh-aio/entrypoint.sh), the baked
+[`cordis.patch.yml`](../../docker/dsh-aio/cordis.patch.yml), and
+[`verify-e2e.sh`](../../docker/dsh-aio/verify-e2e.sh). The harness: (1) restarts `dsh-aio` with `-e
 NR_API_KEY`, (2) creates a dsh session and prompts the agent to open Baidu, (3)
 captures three log streams — the container supervisor log (dsh + chrome-devtools-mcp
 + CDP), the dsh session event stream (`session.history`: `tool/call`,

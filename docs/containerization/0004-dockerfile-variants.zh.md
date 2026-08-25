@@ -7,7 +7,7 @@
 ## 摘要
 
 仓库为 **2 个逻辑镜像** —— `dsh` web 镜像(仅应用)和 `aio` 全家桶镜像
-(应用 + Chrome + noVNC)—— 共维护 **7 个 Dockerfile**,沿三个维度变化:
+(应用 + Chrome + noVNC)—— 共维护 **8 个 Dockerfile**,沿三个维度变化:
 
 - **公网 vs 内网** —— 构建机能访问公网 npm / apt 源,还是必须走内网 Jereh Nexus 镜像。
 - **dev vs 生产** —— dsh 用 tsx 源码派发启动(dev),还是编译入口
@@ -18,25 +18,25 @@
 
 | 你的场景 | 用哪个 |
 |---|---|
-| 有公网,改 dsh 源码迭代 | 根目录 `Dockerfile` → `dsh:dev`,再 `dsh-aio/Dockerfile` |
-| 内网无公网的构建机,从源码构建 | `Dockerfile.internal` → `dsh:dev`,再 `dsh-aio/Dockerfile.internal` |
-| 生产,公网构建机,完整构建 | `dsh-aio/Dockerfile.prod`(基于 `dsh:dev`) |
-| 生产,内网构建机,完整构建 | `dsh-aio/Dockerfile.prod.internal`(基于内网 `dsh:dev`) |
-| 生产,但**无法重建 `dsh:dev`**(npm 源不通/太慢),手上已有 aio 镜像 | `dsh-aio/Dockerfile.prod.layered` ← *10.1.17.58 就是这么部署的* |
-| 想要一个**上来就能写代码**的容器:React 项目已脚手架、dev server 已起、Chrome 已打开页面 | `dsh-aio/Dockerfile.webapp` |
+| 有公网,改 dsh 源码迭代 | `docker/dsh/Dockerfile` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile` |
+| 内网无公网的构建机,从源码构建 | `docker/dsh/Dockerfile.internal` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile.internal` |
+| 生产,公网构建机,完整构建 | `docker/dsh-aio/Dockerfile.prod`(基于 `dsh:dev`) |
+| 生产,内网构建机,完整构建 | `docker/dsh-aio/Dockerfile.prod.internal`(基于内网 `dsh:dev`) |
+| 生产,但**无法重建 `dsh:dev`**(npm 源不通/太慢),手上已有 aio 镜像 | `docker/dsh-aio/Dockerfile.prod.layered` ← *10.1.17.58 就是这么部署的* |
+| 想要一个**上来就能写代码**的容器:React 项目已脚手架、dev server 已起、Chrome 已打开页面 | `docker/dsh-aio/Dockerfile.webapp` |
 
 ## 完整清单
 
-| # | 文件 | 镜像 | 网络 | 模式 | 构建基底 |
-|---|------|------|------|------|----------|
-| 1 | `Dockerfile`(根) | dsh | 公网 | dev | `node:24` |
-| 2 | `Dockerfile.internal`(根) | dsh | 内网 | dev | `harbor…/node:24` |
-| 3 | `dsh-aio/Dockerfile` | aio | 公网 | dev | `dsh:dev` |
-| 4 | `dsh-aio/Dockerfile.internal` | aio | 内网 | dev | `dsh:dev` |
-| 5 | `dsh-aio/Dockerfile.prod` | aio | 公网 | **生产** | `dsh:dev` |
-| 6 | `dsh-aio/Dockerfile.prod.internal` | aio | 内网 | **生产** | `dsh:dev` |
-| 7 | `dsh-aio/Dockerfile.prod.layered` | aio | 公网* | **生产** | 现成 aio 镜像 |
-| 8 | `dsh-aio/Dockerfile.webapp` | aio + 内置项目 | 公网 | **生产** | 现成 aio 镜像 |
+| # | 文件 | 镜像 | 网络 | 模式 | 构建基底 | Harbor 镜像 |
+|---|------|------|------|------|----------|-------------|
+| 1 | `docker/dsh/Dockerfile` | dsh | 公网 | dev | `node:24` | —(仅作 re-base 源) |
+| 2 | `docker/dsh/Dockerfile.internal` | dsh | 内网 | dev | `harbor…/node:24` | —(仅作 re-base 源) |
+| 3 | `docker/dsh-aio/Dockerfile` | aio | 公网 | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 4 | `docker/dsh-aio/Dockerfile.internal` | aio | 内网 | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 5 | `docker/dsh-aio/Dockerfile.prod` | aio | 公网 | **生产** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 6 | `docker/dsh-aio/Dockerfile.prod.internal` | aio | 内网 | **生产** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 7 | `docker/dsh-aio/Dockerfile.prod.layered` | aio | 公网* | **生产** | 现成 aio 镜像 | `harbor.jereh.cn/base/dsh-aio:prod` |
+| 8 | `docker/dsh-aio/Dockerfile.webapp` | aio + 内置项目 | 公网 | **生产** | 现成 aio 镜像 | `harbor.jereh.cn/base/dsh-aio:webapp` |
 
 \* 分层版的 apt 走公网源;内网构建机请换成 `.prod.internal` 里的内网 Nexus `sed` 行。
 
@@ -61,7 +61,7 @@ pnpm —— 内网撞的第一堵墙);`pnpm install --no-frozen-lockfile`。
 
 ## 维度二 —— dev vs 生产
 
-`dsh-aio/` 下两个 entrypoint,只有 dsh 启动行不同:
+`docker/dsh-aio/` 下两个 entrypoint,只有 dsh 启动行不同:
 
 - `entrypoint.sh`(dev)—— `exec pnpm dsh web …`,即
   `node --import tsx/esm apps/cli/src/bin.ts`:运行时转译 TS、esbuild 常驻、
@@ -101,14 +101,18 @@ pnpm —— 内网撞的第一堵墙);`pnpm install --no-frozen-lockfile`。
 ## 构建与运行
 
 ### dsh(所有完整构建的 aio 变体都需要)
+`COPY . .` 需要**仓库根**作为构建上下文,所以在根目录构建(不是进
+`docker/dsh/`),显式写 Dockerfile 路径:
 ```bash
-docker build -t dsh:dev -f Dockerfile .            # 公网
-docker build -t dsh:dev -f Dockerfile.internal .   # 内网
+docker build -t dsh:dev -f docker/dsh/Dockerfile .            # 公网
+docker build -t dsh:dev -f docker/dsh/Dockerfile.internal .   # 内网
 ```
 
 ### aio
+aio 的 Dockerfile 只 `COPY` 同目录的配套文件(entrypoint、sidecar 等),所以
+它的构建上下文就是 `docker/dsh-aio/` 这个目录本身:
 ```bash
-cd docs/containerization/dsh-aio
+cd docker/dsh-aio
 
 docker build -t dsh-aio:dev  -f Dockerfile .                 # 公网 dev
 docker build -t dsh-aio:prod -f Dockerfile.prod .            # 公网 生产(完整)
@@ -168,7 +172,7 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 - 容器内的 Chrome 已经导航到该地址。
 
 ```bash
-cd docs/containerization/dsh-aio
+cd docker/dsh-aio
 docker build -t dsh-aio:webapp -f Dockerfile.webapp .
 
 docker run -d --name dsh-webapp --network host --shm-size=1g \
@@ -241,7 +245,7 @@ POST 以 403 失败。应该改用 `TRUSTED_HOSTS` 声明公网 authority;既非
 
 ## 部署备注(10.1.17.58,无公网)
 
-1. 在有公网的机器(WSL 开发盒)上:`docker build -f Dockerfile.prod.layered
+1. 在有公网的机器(WSL 开发盒)上:`cd docker/dsh-aio && docker build -f Dockerfile.prod.layered
    -t dsh-aio:prod .`(或完整的 `Dockerfile.prod`),推到
    `harbor.jereh.cn/base/dsh-aio:prod`。
 2. 10.1.17.58 上 `docker pull`,以 `--network host` 运行。

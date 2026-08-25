@@ -190,10 +190,11 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 完整路径已验证通过:用真实 `NR_API_KEY` 经 `docker run -e` 注入,容器内 agent 随后
 自主调用 `mcp__chrome__*` 工具打开百度,全程记录日志,并从日志判定跑通。
 
-镜像源文件与验证脚本都放在本文旁边的 [`dsh-aio/`](dsh-aio/) 目录:
-[`Dockerfile`](dsh-aio/Dockerfile)、supervisor [`entrypoint.sh`](dsh-aio/entrypoint.sh)、
-烘焙的 [`cordis.patch.yml`](dsh-aio/cordis.patch.yml)、以及
-[`verify-e2e.sh`](dsh-aio/verify-e2e.sh)。脚本流程:(1) 用 `-e NR_API_KEY`
+镜像源文件与验证脚本都放在 [`docker/dsh-aio/`](../../docker/dsh-aio/) 目录:
+[`Dockerfile`](../../docker/dsh-aio/Dockerfile)、supervisor
+[`entrypoint.sh`](../../docker/dsh-aio/entrypoint.sh)、
+烘焙的 [`cordis.patch.yml`](../../docker/dsh-aio/cordis.patch.yml)、以及
+[`verify-e2e.sh`](../../docker/dsh-aio/verify-e2e.sh)。脚本流程:(1) 用 `-e NR_API_KEY`
 重启 `dsh-aio`;(2) 创建 dsh 会话,提示 agent 打开百度;(3) 抓取三路日志 —— 容器
 supervisor 日志(dsh + chrome-devtools-mcp + CDP)、dsh 会话事件流
 (`session.history`:`tool/call`、`tool/result`、`turn/end`)、以及 CDP 页面列表;

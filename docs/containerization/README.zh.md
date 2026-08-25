@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-在容器里运行 dsh 的实战笔记:编写仓库根目录 [`Dockerfile`](../../Dockerfile)
+在容器里运行 dsh 的实战笔记:编写仓库根目录 [`Dockerfile`](../../docker/dsh/Dockerfile)
 并让 Web UI 可访问过程中踩过的坑,以及每个修复背后的原因。与
 [事故复盘](../postmortem/README.zh.md)(回溯记录逃逸出流程的 bug)不同,这里是
 面向未来的构建/运行笔记:在受限环境(内网、无公网 registry)里容器化 dsh 会遇到

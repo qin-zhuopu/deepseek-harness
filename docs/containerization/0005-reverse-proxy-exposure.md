@@ -80,7 +80,7 @@ quietly.
 
 ## front-proxy: one port, one origin
 
-`front-proxy.js` (in `dsh-aio/`) is the only process bound to a routable
+`front-proxy.js` (in `docker/dsh-aio/`) is the only process bound to a routable
 address; everything it fronts stays on loopback, which is a smaller exposure
 than moving each service to `0.0.0.0` would have been.
 

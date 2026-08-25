@@ -18,6 +18,24 @@ set -e
 # container opens with a ready workspace instead of an empty picker. Set
 # INIT_WORKSPACE= (empty) to skip.
 : "${INIT_WORKSPACE:=/root/workspace}"
+# --- Reverse-proxy support (see entrypoint.prod.sh for the full rationale) --
+# By default every browser-facing URL points at 127.0.0.1 (ports published
+# straight to the host). Behind a reverse proxy the browser cannot reach those
+# ports, so both URLs are configurable:
+#
+#   VNC_PUBLIC_URL   Origin (optionally with a path prefix) where the browser
+#                    reaches this container's noVNC. The entrypoint appends
+#                    /vnc.html plus noVNC's query and injects the result as
+#                    window.__DSH_VNC_PREVIEW_URL__. Empty = the plugin's
+#                    127.0.0.1:6080 default.
+#   RESIZE_ENDPOINT  URL or same-origin path for the resize sidecar.
+#                    Empty = fit-resize.js falls back to <novnc host>:6081.
+#   SIDECAR_BIND     Sidecar listen address; defaults to BIND_ADDR.
+: "${VNC_PUBLIC_URL:=}"
+: "${RESIZE_ENDPOINT:=}"
+: "${SIDECAR_BIND:=${BIND_ADDR}}"
+: "${SIDECAR_PORT:=6081}"
+export SIDECAR_BIND SIDECAR_PORT VNC_PORT
 export DISPLAY=":${DISPLAY_NUM}"
 export PATH=/opt/node/bin:$PATH
 export DSH_HOME=/root/.dsh
@@ -44,8 +62,42 @@ fluxbox >/dev/null 2>&1 &
 log "noVNC (websockify) ${BIND_ADDR}:${NOVNC_PORT}"
 websockify --web=/usr/share/novnc "${BIND_ADDR}:${NOVNC_PORT}" "localhost:${VNC_PORT}" &
 
-log "vnc-resize-sidecar on 127.0.0.1:6081"
+log "vnc-resize-sidecar on ${SIDECAR_BIND}:${SIDECAR_PORT}"
 python3 /usr/local/bin/vnc-resize-sidecar.py &
+
+# Render the two browser-facing URLs (see the variable block at the top).
+# vnc-config.js is always (re)written so a restart with changed variables
+# never serves a stale config; vnc.html loads it just before fit-resize.js.
+if [ -n "${RESIZE_ENDPOINT}" ]; then
+  printf 'window.__DSH_RESIZE_ENDPOINT__=%s;\n' "$(printf '%s' "${RESIZE_ENDPOINT}" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')" \
+    > /usr/share/novnc/vnc-config.js
+  log "resize endpoint: ${RESIZE_ENDPOINT}"
+else
+  : > /usr/share/novnc/vnc-config.js
+fi
+
+# The VNC-preview plugin reads window.__DSH_VNC_PREVIEW_URL__; setting it in
+# the served index.html is the container-baked-script path that plugin
+# documents. Idempotent: the marker comment keeps a restart from stacking
+# injections, and the whole block is skipped when VNC_PUBLIC_URL is empty.
+WEB_INDEX=/app/apps/web/dist/index.html
+if [ -n "${VNC_PUBLIC_URL}" ] && [ -f "${WEB_INDEX}" ]; then
+  VNC_PUBLIC_URL="${VNC_PUBLIC_URL%/}" \
+  python3 - "${WEB_INDEX}" <<'PY'
+import json, os, re, sys
+
+path = sys.argv[1]
+url = os.environ['VNC_PUBLIC_URL'] + '/vnc.html?autoconnect=true&resize=scale'
+marker = '<!--dsh-vnc-preview-url-->'
+tag = f'{marker}<script>window.__DSH_VNC_PREVIEW_URL__={json.dumps(url)};</script>'
+
+html = open(path, encoding='utf-8').read()
+# Drop any previous injection before adding the current one.
+html = re.sub(re.escape(marker) + r'<script>.*?</script>', '', html, flags=re.S)
+open(path, 'w', encoding='utf-8').write(html.replace('</head>', tag + '</head>', 1))
+PY
+  log "vnc preview url: ${VNC_PUBLIC_URL}/vnc.html"
+fi
 
 log "Google Chrome (CDP ${BIND_ADDR}:${CDP_PORT}, window ${SCREEN_W}x${SCREEN_H})"
 google-chrome \

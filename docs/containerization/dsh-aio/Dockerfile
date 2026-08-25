@@ -42,13 +42,9 @@ RUN apt-get update \
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
 COPY fit-resize.js /usr/share/novnc/fit-resize.js
+COPY patch-vnc-html.py /usr/local/bin/patch-vnc-html.py
 RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
- && python3 -c "\
-html = open('/usr/share/novnc/vnc.html').read();\
-insert = '<script src=\"fit-resize.js?v=3\"></script>';\
-open('/usr/share/novnc/vnc.html', 'w').write(\
-    html if 'fit-resize.js' in html\
-    else html.replace('</body>', insert + '</body>'))"
+ && python3 /usr/local/bin/patch-vnc-html.py /usr/share/novnc/vnc.html
 
 # The built dsh application.
 COPY --from=dshbuild /app /app

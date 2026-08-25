@@ -13,7 +13,14 @@
 # The RFB connection is kept ALIVE forever: TigerVNC's Xvnc segfaults if a
 # client sends SetDesktopSize and disconnects immediately, so a persistent
 # session (handshake + SetEncodings + drain thread) is required.
+#
+# Listen address/port and the Xvnc target come from the environment so the
+# same image serves both deployments: loopback-only (the default, websockify
+# is the sole network-facing hop) and behind a reverse proxy such as
+# nginx-proxy, which reaches the container by its bridge IP and therefore
+# needs SIDECAR_BIND=0.0.0.0.
 import http.server
+import os
 import socketserver
 import socket
 import struct
@@ -21,8 +28,10 @@ import threading
 import time
 from urllib.parse import urlparse, parse_qs
 
-VNC_HOST, VNC_PORT = '127.0.0.1', 5900
-LISTEN_PORT = 6081
+VNC_HOST = os.environ.get('VNC_HOST', '127.0.0.1')
+VNC_PORT = int(os.environ.get('VNC_PORT', '5900'))
+LISTEN_ADDR = os.environ.get('SIDECAR_BIND', '127.0.0.1')
+LISTEN_PORT = int(os.environ.get('SIDECAR_PORT', '6081'))
 
 
 def recvn(s: socket.socket, n: int) -> bytes:
@@ -121,4 +130,4 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 socketserver.TCPServer.allow_reuse_address = True
-socketserver.TCPServer(('127.0.0.1', LISTEN_PORT), H).serve_forever()
+socketserver.TCPServer((LISTEN_ADDR, LISTEN_PORT), H).serve_forever()

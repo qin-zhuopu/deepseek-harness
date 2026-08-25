@@ -153,17 +153,90 @@ Open:
 | 5900 | raw VNC (Xvnc) |
 | 9222 | Chrome CDP |
 
+### Environment variables
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NR_API_KEY` | — | LLM credential; the only required one. |
+| `SCREEN_GEOMETRY` | `576x1440x24` | Initial desktop size (the sidecar resizes it to the viewport afterwards). |
+| `BIND_ADDR` | `127.0.0.1` | Listen address for dsh web, websockify and CDP. |
+| `INIT_WORKSPACE` | `/root/workspace` | Directory created and registered as a workspace at startup so a fresh container opens ready. Empty = skip. |
+| `VNC_PUBLIC_URL` | — | Origin (optionally with a path prefix) where the **browser** reaches this container's noVNC, e.g. `https://dsh-vnc.example.org`. The entrypoint appends `/vnc.html?autoconnect=true&resize=scale` and injects it into the served `index.html` as `window.__DSH_VNC_PREVIEW_URL__`. Empty = the plugin's `127.0.0.1:6080` default. |
+| `RESIZE_ENDPOINT` | — | URL or same-origin path where the browser reaches the resize sidecar. Rendered into `vnc-config.js`. Empty = `fit-resize.js` falls back to `<noVNC host>:6081`. |
+| `SIDECAR_BIND` | `= BIND_ADDR` | Sidecar listen address. |
+| `SIDECAR_PORT` | `6081` | Sidecar port. |
+| `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | Port and display overrides (useful for a second container on one host). |
+
+### Behind a reverse proxy (nginx-proxy)
+
+With ports published straight to the host, both browser-facing URLs default to
+`127.0.0.1`, which is correct only when the browser runs on the Docker host.
+Behind a proxy the browser cannot reach those ports, so set `VNC_PUBLIC_URL`
+and `RESIZE_ENDPOINT` — that is what they exist for.
+
+Two hostnames rather than one host with path prefixes: `vnc.html` loads
+`core/`, `app/` and friends by relative path, so mounting noVNC under a
+sub-path would send those requests to the other service at the domain root.
+
+```yaml
+services:
+  dsh-aio:
+    image: harbor.jereh.cn/base/dsh-aio:prod
+    container_name: dsh-aio
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      NR_API_KEY: <your-key>
+      SCREEN_GEOMETRY: 576x1440x24
+      # nginx-proxy reaches the container by its bridge IP, so loopback-only
+      # listeners are unreachable. This opens the dsh control plane to
+      # anything that can reach the proxy — keep the vhost behind the proxy's
+      # own auth (htpasswd/JWT).
+      BIND_ADDR: 0.0.0.0
+      VNC_PUBLIC_URL: https://dsh-vnc.example.org
+      RESIZE_ENDPOINT: https://dsh-vnc.example.org/resize
+      HTTPS_METHOD: noredirect
+      VIRTUAL_HOST_MULTIPORTS: |-
+        dsh.example.org:
+          "/":
+            port: 3080
+        dsh-vnc.example.org:
+          "/":
+            port: 6080
+          "/resize":
+            port: 6081
+    networks:
+      - proxy-net
+```
+
+Spell out `port` on every path: nginx-proxy's "default port" is the container's
+single exposed port, and this image exposes five, so an omitted `port` falls
+back to 80 where nothing listens. WebSocket upgrade needs no extra
+configuration — nginx-proxy's template forwards `Upgrade`/`Connection` already.
+
 ## Deployment note (10.1.17.58, air-gapped)
 
 1. On an egress-capable host (WSL dev box): `docker build -f
    Dockerfile.prod.layered -t dsh-aio:prod .` (or the full
    `Dockerfile.prod`), push to `harbor.jereh.cn/base/dsh-aio:prod`.
 2. On 10.1.17.58: `docker pull`, then run with `--network host`.
-3. Remote viewers reach it through SSH local forwards — but note the preview
-   iframe defaults to `127.0.0.1:6080`, which in a tunneled browser points
-   at the viewer's own machine. For tunneled access, forward the noVNC and
-   sidecar ports to matching local numbers (e.g. `-L 16080:127.0.0.1:6080
-   -L 6081:127.0.0.1:6081`) and patch the served plugin bundle's URL from
-   `:6080` to `:16080` (a runtime sed on
-   `/app/packages/extensions/ui-vnc-preview/lib/client.js`; deployment
-   detail, not in the repo).
+3. Remote viewers reach it through SSH local forwards. The preview iframe
+   defaults to `127.0.0.1:6080`, which in a tunneled browser points at the
+   viewer's own machine, so forward the noVNC and sidecar ports and name the
+   forwarded ports in the environment:
+
+   ```bash
+   ssh -L 13080:127.0.0.1:3080 -L 16080:127.0.0.1:6080 -L 16081:127.0.0.1:6081 <host>
+   ```
+
+   ```bash
+   docker run -d --name dsh-aio --network host --shm-size=1g \
+     -e NR_API_KEY=<your-key> \
+     -e VNC_PUBLIC_URL=http://127.0.0.1:16080 \
+     -e RESIZE_ENDPOINT=http://127.0.0.1:16081/resize \
+     dsh-aio:prod
+   ```
+
+   The viewer then opens `http://127.0.0.1:13080/`. (Earlier revisions patched
+   the compiled plugin bundle with a runtime `sed`; these two variables
+   replace that.)

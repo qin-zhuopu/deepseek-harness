@@ -136,15 +136,85 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 | 5900 | 原始 VNC(Xvnc) |
 | 9222 | Chrome CDP |
 
+### 环境变量
+
+| 变量 | 默认值 | 用途 |
+|------|--------|------|
+| `NR_API_KEY` | — | LLM 凭据;唯一必填项。 |
+| `SCREEN_GEOMETRY` | `576x1440x24` | 初始桌面尺寸(之后 sidecar 会把它跟视口对齐)。 |
+| `BIND_ADDR` | `127.0.0.1` | dsh web、websockify、CDP 的监听地址。 |
+| `INIT_WORKSPACE` | `/root/workspace` | 启动时创建并注册为工作区的目录,新容器一打开就是就绪状态。留空 = 跳过。 |
+| `VNC_PUBLIC_URL` | — | **浏览器**访问本容器 noVNC 的源(可带路径前缀),如 `https://dsh-vnc.example.org`。entrypoint 会追加 `/vnc.html?autoconnect=true&resize=scale`,并注入到下发的 `index.html` 里作为 `window.__DSH_VNC_PREVIEW_URL__`。留空 = 用插件的 `127.0.0.1:6080` 默认值。 |
+| `RESIZE_ENDPOINT` | — | 浏览器访问 resize sidecar 的 URL 或同源路径,渲染进 `vnc-config.js`。留空 = `fit-resize.js` 回退到 `<noVNC 主机>:6081`。 |
+| `SIDECAR_BIND` | `= BIND_ADDR` | sidecar 监听地址。 |
+| `SIDECAR_PORT` | `6081` | sidecar 端口。 |
+| `DSH_PORT` / `NOVNC_PORT` / `CDP_PORT` / `VNC_PORT` / `DISPLAY_NUM` | `3080` / `6080` / `9222` / `5900` / `99` | 端口与显示号覆盖(同一台跑第二个容器时有用)。 |
+
+### 反向代理后面(nginx-proxy)
+
+端口直接发布到宿主机时,两个面向浏览器的 URL 默认都是 `127.0.0.1` —— 只有浏览器
+跑在 Docker 宿主机上才对。走代理时浏览器到不了这些端口,所以要设
+`VNC_PUBLIC_URL` 和 `RESIZE_ENDPOINT`,这正是它们存在的理由。
+
+用两个子域名而不是一个域名加路径前缀:`vnc.html` 是按相对路径加载 `core/`、
+`app/` 这些资源的,若把 noVNC 挂在子路径下,这些请求会落到域名根、被路由到另一个
+服务。
+
+```yaml
+services:
+  dsh-aio:
+    image: harbor.jereh.cn/base/dsh-aio:prod
+    container_name: dsh-aio
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      NR_API_KEY: <你的 key>
+      SCREEN_GEOMETRY: 576x1440x24
+      # nginx-proxy 是通过容器的 bridge IP 访问的,只听 loopback 就连不上。
+      # 这会把 dsh 的管控面暴露给所有能访问代理的人 —— 该 vhost 必须挂在
+      # 代理自己的鉴权(htpasswd/JWT)后面。
+      BIND_ADDR: 0.0.0.0
+      VNC_PUBLIC_URL: https://dsh-vnc.example.org
+      RESIZE_ENDPOINT: https://dsh-vnc.example.org/resize
+      HTTPS_METHOD: noredirect
+      VIRTUAL_HOST_MULTIPORTS: |-
+        dsh.example.org:
+          "/":
+            port: 3080
+        dsh-vnc.example.org:
+          "/":
+            port: 6080
+          "/resize":
+            port: 6081
+    networks:
+      - proxy-net
+```
+
+每个 path 都要显式写 `port`:nginx-proxy 的「默认端口」取自容器唯一暴露的端口,
+而本镜像暴露了五个,省略 `port` 会回退到 80 —— 那上面没有服务。WebSocket 升级
+不用额外配置,nginx-proxy 的模板已经转发了 `Upgrade`/`Connection`。
+
 ## 部署备注(10.1.17.58,无公网)
 
 1. 在有公网的机器(WSL 开发盒)上:`docker build -f Dockerfile.prod.layered
    -t dsh-aio:prod .`(或完整的 `Dockerfile.prod`),推到
    `harbor.jereh.cn/base/dsh-aio:prod`。
 2. 10.1.17.58 上 `docker pull`,以 `--network host` 运行。
-3. 远程观看者经 SSH 本地转发访问 —— 但注意预览 iframe 默认
-   `127.0.0.1:6080`,在走隧道的浏览器里会指向观看者自己的机器。隧道访问时,
-   把 noVNC 和 sidecar 端口转发到对应本地端口(如 `-L 16080:127.0.0.1:6080
-   -L 6081:127.0.0.1:6081`),并把下发插件产物里的 URL 从 `:6080` 改成
-   `:16080`(对 `/app/packages/extensions/ui-vnc-preview/lib/client.js` 做
-   运行时 sed;这是部署细节,不进仓库)。
+3. 远程观看者经 SSH 本地转发访问。预览 iframe 默认 `127.0.0.1:6080`,在走隧道
+   的浏览器里会指向观看者自己的机器,所以要把 noVNC 和 sidecar 端口转发出来,
+   并把转发后的端口写进环境变量:
+
+   ```bash
+   ssh -L 13080:127.0.0.1:3080 -L 16080:127.0.0.1:6080 -L 16081:127.0.0.1:6081 <host>
+   ```
+
+   ```bash
+   docker run -d --name dsh-aio --network host --shm-size=1g \
+     -e NR_API_KEY=<你的 key> \
+     -e VNC_PUBLIC_URL=http://127.0.0.1:16080 \
+     -e RESIZE_ENDPOINT=http://127.0.0.1:16081/resize \
+     dsh-aio:prod
+   ```
+
+   观看者随后打开 `http://127.0.0.1:13080/`。(早期版本是用运行时 `sed` 去改编译
+   后的插件产物;这两个变量取代了那种做法。)

@@ -17,16 +17,30 @@
 # never baked into the image.
 # =====================================================================
 
+# Build arguments, all defaulted to the amd64 images this file was written for:
+#   DSH_IMAGE          stage-1 source of the built /app
+#   CHROME_BASE_IMAGE  runtime base. The harbor default is linux/amd64 only; on
+#                      arm64 build docker/chrome-base/Dockerfile and pass it here.
+#   NODE_IMAGE         source of the /opt/node runtime, mirror-redirectable
+ARG DSH_IMAGE=dsh:dev
+ARG CHROME_BASE_IMAGE=harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
+ARG NODE_IMAGE=node:24
+
 # ---- Stage 1: reuse the already-built dsh app ----
-FROM dsh:dev AS dshbuild
+FROM ${DSH_IMAGE} AS dshbuild
 # /app is fully installed + built here.
 
+# ---- Stage 1b: the Node 24 runtime, as a named stage ----
+# BuildKit rejects variable expansion in `COPY --from=`, so the argument is
+# resolved by this FROM and the copies below reference the stage name.
+FROM ${NODE_IMAGE} AS noderuntime
+
 # ---- Stage 2: runtime on the Chrome base ----
-FROM harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
+FROM ${CHROME_BASE_IMAGE}
 
 # Node 24 in an isolated prefix (base image ships an unusable nvm node).
-COPY --from=node:24 /usr/local/bin/node /opt/node/bin/node
-COPY --from=node:24 /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
+COPY --from=noderuntime /usr/local/bin/node /opt/node/bin/node
+COPY --from=noderuntime /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
 ENV PATH=/opt/node/bin:$PATH
 RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
  && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \

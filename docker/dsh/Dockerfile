@@ -6,8 +6,18 @@
 # so `-p 3080:3080` does NOT work — the mapping targets the container's eth0, not
 # its loopback. Use `--network host`: the server's 127.0.0.1:3080 then lands on
 # the host loopback (on WSL2, reachable from Windows at http://127.0.0.1:3080/).
+#
+# Builds for the host's own CPU; linux/amd64 and linux/arm64 both work, because
+# every native dependency (esbuild, sharp, node-pty, @vscode/ripgrep,
+# node-addon-landlock-run) publishes both and `pnpm install` resolves the
+# optional dependency matching the build platform. The build therefore must NOT
+# receive a node_modules from the host — see .dockerignore.
+#
+# NODE_IMAGE redirects the base image at a registry mirror on hosts that cannot
+# reach Docker Hub, e.g. --build-arg NODE_IMAGE=docker.1ms.run/library/node:24.
 
-FROM node:24
+ARG NODE_IMAGE=node:24
+FROM ${NODE_IMAGE}
 
 # ── corepack + pnpm (pinned by repo) ──
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate

@@ -14,11 +14,14 @@
   `apps/cli/lib/bin.js` 启动(生产,约 1 秒起)。
 - **完整构建 vs 分层** —— 从源码全部重建,还是在已构建好的 aio 镜像上叠生产栈。
 
+第 9 个文件 `docker/chrome-base/Dockerfile` 不属于这两个镜像的任何变体:它为 Harbor 未发布的平台重建 aio 运行基底(见[在 arm64 主机上](#在-arm64-主机上))。
+
 ## 快速选择
 
 | 你的场景 | 用哪个 |
 |---|---|
 | 有公网,改 dsh 源码迭代 | `docker/dsh/Dockerfile` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile` |
+| **arm64** 主机 | 同样用公网那套文件,外加 `docker/chrome-base/Dockerfile` 构建运行基底 —— 见[在 arm64 主机上](#在-arm64-主机上) |
 | 内网无公网的构建机,从源码构建 | `docker/dsh/Dockerfile.internal` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile.internal` |
 | 生产,公网构建机,完整构建 | `docker/dsh-aio/Dockerfile.prod`(基于 `dsh:dev`) |
 | 生产,内网构建机,完整构建 | `docker/dsh-aio/Dockerfile.prod.internal`(基于内网 `dsh:dev`) |
@@ -131,6 +134,33 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 > **必须 `--network host`。** dsh web 出于 RCE 安全只绑 `127.0.0.1`、拒绝
 > `0.0.0.0`,因此 `-p 3080:3080` 不生效。其他机器无法直连 `<宿主IP>:3080`,
 > 要么在宿主本机访问,要么走 SSH 隧道。
+
+### 在 arm64 主机上
+
+两个镜像都能在 linux/arm64 上按主机自身 CPU 构建,无需交叉编译,也不用模拟。与 amd64 主机相比只有两处不同,而且都通过构建参数解决,不必改文件。
+
+**运行基底。** `harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome` 只发布了 linux/amd64,arm64 拉取会报 `no matching manifest for linux/arm64/v8`。`docker/chrome-base/Dockerfile` 用 `ubuntu:24.04` 加 Google apt 源重建一个等价基底,该源的 `stable main` 组件为 arm64 提供 `google-chrome-stable`。构建最后跑一次 headless `--dump-dom`,让跑不动 Chrome 的基底在构建阶段就失败,而不是等到容器启动。
+
+**基础镜像可达性。** `NODE_IMAGE`(两个镜像)、`UBUNTU_IMAGE`(chrome 基底)、`CHROME_BASE_IMAGE` 和 `DSH_IMAGE`(aio)可把每个 `FROM` 重定向到镜像源,供访问不到 Docker Hub 的主机使用。BuildKit 不支持在 `COPY --from=` 里做变量展开,因此 `NODE_IMAGE` 由一个命名阶段 `noderuntime` 解析,再由 COPY 引用该阶段名。
+
+```bash
+MIRROR=docker.1ms.run/library   # 任何提供 arm64 manifest 的镜像源
+
+docker build --build-arg UBUNTU_IMAGE=$MIRROR/ubuntu:24.04 \
+  -t dsh-chrome-base:24.04 -f docker/chrome-base/Dockerfile .
+
+docker build --build-arg NODE_IMAGE=$MIRROR/node:24 \
+  --build-arg DSH_CLIENT_COMMIT_HASH=$(git rev-parse HEAD) \
+  -t dsh:dev -f docker/dsh/Dockerfile .
+
+docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
+  --build-arg NODE_IMAGE=$MIRROR/node:24 \
+  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile docker/dsh-aio
+```
+
+应用本身不需要任何 arm64 适配:`pnpm install` 会从同一份 lockfile 解析出每个原生包的 arm64 可选依赖(esbuild、sharp、node-pty、`@vscode/ripgrep`、lightningcss、oxc-resolver、rolldown、oxlint)。这也正是构建不能接收宿主 `node_modules` 的原因 —— `.dockerignore` 已将其排除,因为拷进来的 amd64 目录树会让 `pnpm install` 去调和一堆加载不了的二进制。
+
+唯一的行为差异在[Landlock 启动器](../../native/landlock-run/README.zh.md):它的预编译二进制属于发布产物而非仓库内容,所以源码构建在两种架构上都没有,沙箱探测按设计失败关闭。`dsh web` 不受影响,受影响的是沙箱化的 shell 执行。
 
 ### 端口
 

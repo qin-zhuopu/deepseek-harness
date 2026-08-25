@@ -17,11 +17,14 @@ varied along three axes:
 - **full build vs layered** — rebuild everything from source, or layer the
   prod display stack onto an already-built aio image.
 
+A ninth file, `docker/chrome-base/Dockerfile`, is not a variant of either image: it rebuilds the aio runtime base for a platform Harbor does not publish ([On arm64 hosts](#on-arm64-hosts)).
+
 ## Quick picker
 
 | Your situation | Use |
 |---|---|
 | Public egress, iterating on dsh source | `docker/dsh/Dockerfile` → `dsh:dev`, then `docker/dsh-aio/Dockerfile` |
+| An **arm64** host | the same public files, plus `docker/chrome-base/Dockerfile` for the runtime base — see [On arm64 hosts](#on-arm64-hosts) |
 | Air-gapped build host, building from source | `docker/dsh/Dockerfile.internal` → `dsh:dev`, then `docker/dsh-aio/Dockerfile.internal` |
 | Production, public build host, full build | `docker/dsh-aio/Dockerfile.prod` (on top of `dsh:dev`) |
 | Production, air-gapped build host, full build | `docker/dsh-aio/Dockerfile.prod.internal` (on top of an internal `dsh:dev`) |
@@ -158,6 +161,33 @@ Open:
 > `0.0.0.0` for RCE safety), so `-p 3080:3080` does not work. Other machines
 > cannot reach `<host-ip>:3080` directly; access on the host itself or via
 > an SSH tunnel.
+
+### On arm64 hosts
+
+Both images build for the host's own CPU on linux/arm64 with no cross-compilation and no emulation. Two things differ from an amd64 host, and both are build arguments rather than edits:
+
+**The runtime base.** `harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome` is published for linux/amd64 only, so an arm64 pull fails with `no matching manifest for linux/arm64/v8`. `docker/chrome-base/Dockerfile` builds an equivalent from `ubuntu:24.04` plus Google's apt repository, whose `stable main` component serves `google-chrome-stable` for arm64. The build ends with a headless `--dump-dom` so a base that cannot run Chrome fails there instead of at container start.
+
+**Base-image reachability.** `NODE_IMAGE` (both images), `UBUNTU_IMAGE` (chrome base), `CHROME_BASE_IMAGE` and `DSH_IMAGE` (aio) redirect every `FROM` at a mirror on hosts that cannot reach Docker Hub. BuildKit rejects variable expansion in `COPY --from=`, so `NODE_IMAGE` is resolved by a named `noderuntime` stage that the copies reference.
+
+```bash
+MIRROR=docker.1ms.run/library   # any mirror that serves arm64 manifests
+
+docker build --build-arg UBUNTU_IMAGE=$MIRROR/ubuntu:24.04 \
+  -t dsh-chrome-base:24.04 -f docker/chrome-base/Dockerfile .
+
+docker build --build-arg NODE_IMAGE=$MIRROR/node:24 \
+  --build-arg DSH_CLIENT_COMMIT_HASH=$(git rev-parse HEAD) \
+  -t dsh:dev -f docker/dsh/Dockerfile .
+
+docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
+  --build-arg NODE_IMAGE=$MIRROR/node:24 \
+  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile docker/dsh-aio
+```
+
+Nothing in the application needs an arm64 port: `pnpm install` resolves the arm64 optional dependency of every native package (esbuild, sharp, node-pty, `@vscode/ripgrep`, lightningcss, oxc-resolver, rolldown, oxlint) from the same lockfile. This is why the build must not receive a host `node_modules` — `.dockerignore` excludes it, because a copied amd64 tree leaves `pnpm install` reconciling unloadable binaries.
+
+The one behavioral difference is the [Landlock launcher](../../native/landlock-run/README.md): its prebuilt binaries are release artifacts rather than repository content, so a source build has none on either architecture and the sandbox probe falls closed by design. `dsh web` runs unaffected; sandboxed shell execution is what degrades.
 
 ### Ports
 

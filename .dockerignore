@@ -1,0 +1,28 @@
+# Build-context exclusions for docker/dsh/Dockerfile* (context = repo root).
+#
+# node_modules MUST NOT enter the context: the tree carries host-platform
+# binaries (linux-x64 / darwin / win32 esbuild, sharp, node-pty, ripgrep), and
+# copying them into an image for a different CPU leaves `pnpm install` to
+# reconcile a tree of unloadable native modules. The image installs from the
+# lockfile instead, which resolves the optional dependencies for its own
+# platform.
+node_modules
+**/node_modules
+
+# The image never runs git; the source commit arrives as DSH_CLIENT_COMMIT_HASH
+# (client-build-environment.ts reads it instead of calling `git rev-parse`).
+.git
+
+# Build outputs are produced inside the image by `pnpm run build`.
+**/lib
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+# Local state that must never be baked into an image. Only a repository-root
+# .dsh is developer state; `**/.dsh` would also drop the tracked
+# examples/acp-agent snapshot fixtures that live under a .dsh directory.
+.env
+.env.*
+/.dsh
+coverage

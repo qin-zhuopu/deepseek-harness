@@ -17,3 +17,4 @@ past it.
 | [0003](0003-all-in-one-chrome-novnc-mcp.md) | An all-in-one image: dsh + Chrome (noVNC) + chrome-devtools MCP |
 | [0004](0004-dockerfile-variants.md) | The Dockerfile variant matrix: public/internal × dev/prod |
 | [0005](0005-reverse-proxy-exposure.md) | Exposing the aio image through a reverse proxy: front-proxy, the /api trust fence, and two wrong assumptions |
+| [0006](0006-aio-build-deploy-scripts.md) | The aio build/ci/deploy scripts: what each one does and when to use it |

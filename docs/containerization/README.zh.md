@@ -15,3 +15,4 @@
 | [0003](0003-all-in-one-chrome-novnc-mcp.zh.md) | 开箱即用镜像:dsh + Chrome(noVNC) + chrome-devtools MCP |
 | [0004](0004-dockerfile-variants.zh.md) | Dockerfile 变体矩阵:公网/内网 × dev/生产 |
 | [0005](0005-reverse-proxy-exposure.zh.md) | 把 aio 镜像暴露到反向代理后面:front-proxy、/api 信任栅栏,以及两个错误假设 |
+| [0006](0006-aio-build-deploy-scripts.zh.md) | aio 的 build/ci/deploy 脚本:各干什么、何时用 |

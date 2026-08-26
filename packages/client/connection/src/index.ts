@@ -171,6 +171,29 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     },
   }
   ctx.effect(() => ctx.webServer.register(route), 'client-connection: /api route')
+  // Public read-only deploy/build metadata. Outside the /api prefix and the
+  // browser-trust fence on purpose: it carries no session state, and ops tools
+  // (and the deploy script) read it without an Origin. Fields are null when the
+  // image/deployment did not stamp them (local dev run, older image).
+  const deployInfoRoute: WebRoute = {
+    kind: 'exact',
+    path: '/deploy-info',
+    handler: async (req, res) => {
+      if (req.method !== 'GET') {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({
+        image: process.env.DEPLOY_IMAGE ?? null,
+        deployTs: process.env.DEPLOY_TS ?? null,
+        commit: process.env.DSH_CLIENT_COMMIT_HASH ?? null,
+        buildTs: process.env.DSH_BUILD_TS ?? null,
+      }))
+    },
+  }
+  ctx.effect(() => ctx.webServer.register(deployInfoRoute), 'client-connection: /deploy-info route')
   ctx.inject(['apiProxy'], (apiCtx) => {
     assertImageBodyCapacity(apiCtx, maxRequestBodyBytes)
     const downlinks = new WebSocketDownlinks(apiCtx.apiProxy)

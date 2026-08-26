@@ -121,14 +121,35 @@ describe('connection node half', () => {
     expect(upgrades).toHaveLength(0)
   })
 
-  it('registers one HTTP route plus one upgrade route per downlink and removes all three with the fiber', async () => {
+  it('registers the /api prefix route plus the public /deploy-info route, and one upgrade route per downlink; all removed with the fiber', async () => {
     const { routes, upgrades, dispose } = await mounted()
-    expect(routes).toHaveLength(1)
-    expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
+    expect(routes).toHaveLength(2)
+    expect(routes.find(r => r.path === API_PATH)).toMatchObject({ kind: 'prefix' })
+    expect(routes.find(r => r.path === '/deploy-info')).toMatchObject({ kind: 'exact' })
     expect(upgrades.map(route => route.path)).toEqual([MUX_EVENTS_PATH, HOST_EVENTS_PATH])
     await dispose()
     expect(routes).toHaveLength(0)
     expect(upgrades).toHaveLength(0)
+  })
+
+  it('serves build/deploy metadata as JSON on /deploy-info without the trust fence', async () => {
+    process.env.DEPLOY_IMAGE = 'harbor.jereh.cn/base/dsh-aio:dev-arm64'
+    process.env.DEPLOY_TS = '20260826T043057Z'
+    const { routes, dispose } = await mounted()
+    try {
+      const route = routes.find(r => r.path === '/deploy-info')!
+      const { response, state } = fakeResponse()
+      await route.handler(fakeRequest({ host: 'harness.example' }, '/deploy-info'), response)
+      expect(state.status).toBe(200)
+      expect(JSON.parse(String(state.body))).toMatchObject({
+        image: 'harbor.jereh.cn/base/dsh-aio:dev-arm64',
+        deployTs: '20260826T043057Z',
+      })
+    } finally {
+      delete process.env.DEPLOY_IMAGE
+      delete process.env.DEPLOY_TS
+      await dispose()
+    }
   })
 
   it('requires WebSocket upgrade for network GETs to either event path', async () => {
@@ -225,8 +246,7 @@ describe('connection node half', () => {
     ctx.provide('webServer', fakeHttpServer(routes, []) as WebServer)
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    expect(routes).toHaveLength(1)
-    expect(routes[0]).toMatchObject({ kind: 'prefix', path: API_PATH })
+    expect(routes.find(r => r.path === API_PATH)).toMatchObject({ kind: 'prefix' })
 
     const connection = ctx.get('connection') as HostConnectionHandle
     const calls: unknown[] = []
@@ -260,7 +280,7 @@ describe('connection node half', () => {
       authority: 'trusted-host',
     })).toThrow(/duplicate route/)
     await remove()
-    expect(routes.map(candidate => candidate.path)).toEqual([API_PATH])
+    expect(routes.map(candidate => candidate.path).sort()).toEqual([API_PATH, '/deploy-info'].sort())
     await fiber.dispose()
     expect(routes).toHaveLength(0)
   })

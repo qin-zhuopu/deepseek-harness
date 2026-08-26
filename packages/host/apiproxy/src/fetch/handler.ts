@@ -271,6 +271,20 @@ export function toFetchHandler(api: ApiProxy): { fetch: typeof fetch } {
         return new Response(null, { status: response.status, headers: response.headers })
       }
 
+      // Deployment info endpoint: read-only metadata for ops dashboards and
+      // the deploy script's verification. Served outside /api on purpose —
+      // it carries no session state and must never sit behind the
+      // browser-trust fence. Fields are null when the image/deployment did
+      // not provide them (local dev run, older image).
+      if (path === '/deploy-info' && req.method === 'GET') {
+        return Response.json({
+          image: process.env.DEPLOY_IMAGE ?? null,
+          deployTs: process.env.DEPLOY_TS ?? null,
+          commit: process.env.DSH_CLIENT_COMMIT_HASH ?? null,
+          buildTs: process.env.DSH_BUILD_TS ?? null,
+        })
+      }
+
       if (req.method !== 'POST' || !path.startsWith('/api/')) {
         return new Response('not found', { status: 404 })
       }

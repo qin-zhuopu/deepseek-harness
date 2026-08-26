@@ -36,6 +36,9 @@ RUN pnpm install --frozen-lockfile
 # client-build-environment.ts uses this instead of calling `git rev-parse HEAD`.
 ARG DSH_CLIENT_COMMIT_HASH=b150a551b8d465e31e418e1b2eaf5e79bbb7d28e
 ENV DSH_CLIENT_COMMIT_HASH=${DSH_CLIENT_COMMIT_HASH}
+# Bake time of the docker build (passed by docker/build-dsh-aio-dev-*.sh).
+ARG DSH_BUILD_TS=unknown
+ENV DSH_BUILD_TS=${DSH_BUILD_TS}
 
 # Build library + web artifacts
 RUN pnpm run build

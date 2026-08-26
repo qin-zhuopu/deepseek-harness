@@ -41,12 +41,13 @@ git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "请在仓库内运�
 
 COMMIT="$(git rev-parse HEAD)"
 COMMIT_SHORT="$(git rev-parse --short HEAD)"
+BUILD_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 
 echo "----------------------------------------"
 echo " 主机     : $(hostname) ($(uname -m))"
 echo " 源码提交 : $COMMIT_SHORT"
 echo " 底座     : $CHROME_BASE_IMAGE"
-echo " 产物     : dsh-aio:dev-amd64 + dsh-aio:dev-${COMMIT_SHORT}-amd64"
+echo " 产物     : dsh-aio:dev-amd64 + dsh-aio:dev-amd64-${COMMIT_SHORT}"
 [ "$PUSH" = 1 ] && echo " 推送     : $HARBOR_BASE（全部 -amd64 后缀 tag）" \
                  || echo " 推送     : 无（只构建）"
 echo "----------------------------------------"
@@ -55,6 +56,7 @@ echo "----------------------------------------"
 log "1/2 构建 dsh:dev（源码提交 $COMMIT_SHORT）"
 docker build \
   --build-arg "DSH_CLIENT_COMMIT_HASH=$COMMIT" \
+  --build-arg "DSH_BUILD_TS=$BUILD_TS" \
   -t dsh:dev-amd64 \
   -f docker/dsh/Dockerfile .
 
@@ -64,11 +66,11 @@ docker build \
   --build-arg "CHROME_BASE_IMAGE=$CHROME_BASE_IMAGE" \
   --build-arg "DSH_IMAGE=dsh:dev-amd64" \
   -t dsh-aio:dev-amd64 \
-  -t "dsh-aio:dev-$COMMIT_SHORT-amd64" \
+  -t "dsh-aio:dev-amd64-$COMMIT_SHORT" \
   -f docker/dsh-aio/Dockerfile \
   docker/dsh-aio
 
-log "构建完成：dsh-aio:dev-amd64 / dsh-aio:dev-$COMMIT_SHORT-amd64"
+log "构建完成：dsh-aio:dev-amd64 / dsh-aio:dev-amd64-$COMMIT_SHORT"
 
 # ── 推送（可选） ────────────────────────────────────────────────────────
 push_as() {  # push_as <本地镜像> <harbor ref>（ref 自带 -amd64 后缀）
@@ -89,7 +91,7 @@ if [ "$PUSH" = 1 ]; then
 
   push_as dsh:dev-amd64           "$HARBOR_BASE/dsh:dev-amd64"
   push_as dsh-aio:dev-amd64       "$HARBOR_BASE/dsh-aio:dev-amd64"
-  push_as "dsh-aio:dev-$COMMIT_SHORT-amd64" "$HARBOR_BASE/dsh-aio:dev-$COMMIT_SHORT-amd64"
+  push_as "dsh-aio:dev-amd64-$COMMIT_SHORT" "$HARBOR_BASE/dsh-aio:dev-amd64-$COMMIT_SHORT"
 
   log "推送完成。"
 fi

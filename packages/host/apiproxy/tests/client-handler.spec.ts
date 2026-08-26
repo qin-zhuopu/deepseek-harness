@@ -814,3 +814,35 @@ describe('config unary surface', () => {
     expect(response.result.error.code).toBe('bad-request')
   })
 })
+
+describe('deploy-info path', () => {
+  it('serves build/deploy metadata as JSON outside the /api fence', async () => {
+    process.env.DEPLOY_IMAGE = 'harbor.jereh.cn/base/dsh-aio:dev-arm64'
+    process.env.DEPLOY_TS = '20260826T043057Z'
+    try {
+      const doFetch = toFetchHandler(scriptedApi({})).fetch
+      const response = await doFetch(new Request('http://127.0.0.1:3080/deploy-info'))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        image: 'harbor.jereh.cn/base/dsh-aio:dev-arm64',
+        deployTs: '20260826T043057Z',
+      })
+    } finally {
+      delete process.env.DEPLOY_IMAGE
+      delete process.env.DEPLOY_TS
+    }
+  })
+
+  it('leaves the metadata fields null when the image/deployment did not set them', async () => {
+    const doFetch = toFetchHandler(scriptedApi({})).fetch
+    const response = await doFetch(new Request('http://127.0.0.1:3080/deploy-info'))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({ image: null, deployTs: null })
+  })
+
+  it('still 404s other non-api GETs', async () => {
+    const doFetch = toFetchHandler(scriptedApi({})).fetch
+    const response = await doFetch(new Request('http://127.0.0.1:3080/nope'))
+    expect(response.status).toBe(404)
+  })
+})

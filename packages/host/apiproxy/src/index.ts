@@ -59,6 +59,13 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Fixed root directory that holds every workspace as a direct child. Set it
+   * to an absolute path this deployment can create and watch; a local dev host
+   * overrides the container default via the profile patch.
+   * @default '/workspaces'
+   */
+  workspaceRoot?: string
 }
 
 /**
@@ -74,6 +81,7 @@ export class ApiProxyService extends Service implements ApiProxy {
 
   static Config: z<Config> = z.object({
     nativeOpen: z.boolean(),
+    workspaceRoot: z.string(),
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
     coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
@@ -91,7 +99,10 @@ export class ApiProxyService extends Service implements ApiProxy {
   readonly llm: ApiProxy['llm']
   readonly events: ApiProxy['events']
   readonly downloads: ApiProxy['downloads']
+  readonly initWorkspaceRoot: ApiProxy['initWorkspaceRoot']
   readonly respond: ApiProxy['respond']
+
+  private readonly api: ApiProxy
 
   constructor(ctx: Context, config: Config) {
     super(ctx, 'apiProxy')
@@ -99,6 +110,7 @@ export class ApiProxyService extends Service implements ApiProxy {
       defaultModelSelection: () => ctx.agentDefaultModel.currentSelection(),
       saveDefaultModelSelection: selection => ctx.agentDefaultModel.saveSelection(selection),
       cwd: process.cwd(),
+      ...config.workspaceRoot === undefined ? {} : { workspaceRoot: config.workspaceRoot },
       ...config.nativeOpen === undefined ? {} : { canOpenPath: () => config.nativeOpen as boolean },
       ...(config.sessionExportCompressionLevel === undefined
         ? {}
@@ -107,6 +119,7 @@ export class ApiProxyService extends Service implements ApiProxy {
         ? {}
         : { coldBlankProbeMaxBytes: config.coldBlankProbeMaxBytes }),
     })
+    this.api = api
     this.sessions = api.sessions
     this.subagents = api.subagents
     this.workspace = api.workspace
@@ -122,6 +135,12 @@ export class ApiProxyService extends Service implements ApiProxy {
     // createApiProxy returns closures (no `this` capture), so the bind is
     // behavior-neutral.
     this.respond = api.respond.bind(api)
+    this.initWorkspaceRoot = api.initWorkspaceRoot.bind(api)
+  }
+
+  protected async [Service.init](): Promise<void> {
+    const dispose = await this.api.initWorkspaceRoot()
+    this.ctx.effect(() => dispose, 'apiProxy.workspaceRootWatch')
   }
 }
 

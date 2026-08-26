@@ -39,6 +39,12 @@ export interface ApiProxy {
    * @returns Transport receipt for the response delivery.
    */
   respond(message: ClientResponse): Promise<RpcReceipt>
+  /**
+   * Prepare the fixed workspace root and mirror its child directories into the
+   * registry, then watch it for live changes. Not a domain method; the gateway
+   * plugin drives it once at startup. Returns a disposer that stops the watcher.
+   */
+  initWorkspaceRoot(signal?: AbortSignal): Promise<() => void>
 }
 
 // ---- Domain interfaces and payload entities ----

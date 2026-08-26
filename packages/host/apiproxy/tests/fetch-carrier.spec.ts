@@ -300,6 +300,9 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
         return new Response('stub', { status: 404 })
       },
     },
+    async initWorkspaceRoot() {
+      return () => {}
+    },
   }
 }
 

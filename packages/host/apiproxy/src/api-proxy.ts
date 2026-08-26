@@ -4,7 +4,8 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { mkdir, stat } from 'node:fs/promises'
+import { watch, type FSWatcher } from 'node:fs'
+import { mkdir, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { z as zod } from 'zod'
@@ -26,6 +27,7 @@ import type { SubagentListEntry as CatalogSubagentListEntry } from '@deepseek-ai
 import { isUserInvocable } from '@deepseek-ai/dsh-skill'
 import type { Workspace, WorkspaceRecord } from '@deepseek-ai/dsh-workspace'
 import {
+  realpathNormalize,
   workspaceDomainState, workspaceRecord, WorkspaceId as brandWorkspaceId,
   WorkspaceMoveInvalidError, WorkspaceOrderInvalidError, WorkspaceUnknownSessionError,
 } from '@deepseek-ai/dsh-workspace'
@@ -119,6 +121,8 @@ const SESSION_SEARCH_PROVIDER_CALL_LIMIT = 100
 
 /** Bound cold-log stat fan-out and settle each started batch before cancellation returns. */
 const COLD_SUMMARY_BATCH_SIZE = 16
+/** Coalesce a burst of workspace-root filesystem events into one reconcile pass. */
+const WORKSPACE_ROOT_WATCH_DEBOUNCE_MS = 200
 /** Default maximum artifact size eligible for one cold blankness read. */
 export const DEFAULT_COLD_BLANK_PROBE_MAX_BYTES = 1024
 
@@ -592,6 +596,13 @@ export interface ApiProxyDefaults {
   saveDefaultModelSelection?: (selection: ModelSelection) => Promise<void>
   /** Default project directory for new sessions whose create request carries no cwd. */
   cwd: string
+  /**
+   * Fixed root directory that holds every workspace as a direct child. The
+   * gateway mints prompt-created directories here, mirrors the directory
+   * listing into the registry at startup, and watches it for live changes.
+   * @default '/workspaces'
+   */
+  workspaceRoot?: string
   /** Native open-with-default-application; injectable for carrier tests. */
   openPath?: (path: string, signal: AbortSignal) => Promise<void>
   /** Native text-editor handoff; injectable for settings-document tests. */
@@ -1673,8 +1684,107 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     return operation
   }
 
-  /** The fixed root under which prompt-created workspaces are minted. A Linux-container deployment convention (`/workspaces/<name>`). */
-  const WORKSPACE_PROMPT_ROOT = '/workspaces'
+  /** The fixed root under which every workspace lives as a direct child. A Linux-container deployment convention (`/workspaces/<name>`). */
+  const WORKSPACE_PROMPT_ROOT = defaults.workspaceRoot ?? '/workspaces'
+
+  /** The workspace minted when the root starts empty, so the sidebar is never blank. */
+  const WORKSPACE_ROOT_SEED_NAME = 'daily'
+
+  /**
+   * Mirror the fixed root's direct child directories into the registry: adopt
+   * every child not yet owned, and drop every registry entry under the root
+   * whose directory no longer exists. Only entities whose canonical path sits
+   * directly under the canonical root are managed — workspaces bootstrapped
+   * from session history elsewhere are never touched. A full re-scan each call
+   * keeps the pass idempotent and independent of watch-event detail.
+   */
+  async function reconcileWorkspaceRoot(canonicalRoot: string): Promise<void> {
+    let entries: string[]
+    try {
+      entries = await readdir(canonicalRoot)
+    } catch (error) {
+      ctx.logger.warn(`workspace root '${canonicalRoot}' could not be listed: ${errorChain(error)}`)
+      return
+    }
+    const diskPaths = new Set<string>()
+    for (const entry of entries) {
+      if (entry.startsWith('.')) continue
+      const child = join(canonicalRoot, entry)
+      let canonicalChild: string
+      try {
+        if (!(await stat(child)).isDirectory()) continue
+        canonicalChild = await realpathNormalize(child)
+      } catch {
+        continue
+      }
+      diskPaths.add(canonicalChild)
+      if (await ctx.workspaceRegistry.resolveByPath(canonicalChild) === undefined) {
+        try {
+          await ensureWorkspace(canonicalChild)
+        } catch (error) {
+          ctx.logger.warn(`could not adopt workspace directory '${canonicalChild}': ${errorChain(error)}`)
+        }
+      }
+    }
+    const rootPrefix = canonicalRoot.endsWith('/') ? canonicalRoot : `${canonicalRoot}/`
+    for (const workspace of ctx.workspaceRegistry.list()) {
+      if (!workspace.path.startsWith(rootPrefix)) continue
+      // A managed entity is a direct child; a nested grandchild is not ours.
+      if (workspace.path.slice(rootPrefix.length).includes('/')) continue
+      if (diskPaths.has(workspace.path)) continue
+      try {
+        await ctx.workspaceRegistry.delete(workspace.id)
+      } catch (error) {
+        ctx.logger.warn(`could not deregister removed workspace '${workspace.path}': ${errorChain(error)}`)
+      }
+    }
+  }
+
+  /**
+   * Prepare the fixed workspace root and keep the registry mirrored to it:
+   * create the root, seed one workspace when it is empty, run a first
+   * reconcile, then watch for live directory changes. Returns a disposer that
+   * stops the watcher. A platform without usable `fs.watch` degrades to the
+   * startup scan alone (no live refresh), never a boot failure.
+   */
+  async function initWorkspaceRoot(signal?: AbortSignal): Promise<() => void> {
+    await mkdir(WORKSPACE_PROMPT_ROOT, { recursive: true })
+    const canonicalRoot = await realpathNormalize(WORKSPACE_PROMPT_ROOT)
+    const initial = await readdir(canonicalRoot)
+    const hasChild = initial.some(entry => !entry.startsWith('.'))
+    if (!hasChild) {
+      try {
+        await mkdir(join(canonicalRoot, WORKSPACE_ROOT_SEED_NAME))
+      } catch (error) {
+        ctx.logger.warn(`could not seed the '${WORKSPACE_ROOT_SEED_NAME}' workspace: ${errorChain(error)}`)
+      }
+    }
+    await reconcileWorkspaceRoot(canonicalRoot)
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let reconciling: Promise<void> = Promise.resolve()
+    const schedule = (): void => {
+      if (timer !== undefined) return
+      timer = setTimeout(() => {
+        timer = undefined
+        reconciling = reconciling.then(() => reconcileWorkspaceRoot(canonicalRoot))
+          .catch((error: unknown) => { ctx.logger.warn(`workspace root reconcile failed: ${errorChain(error)}`) })
+      }, WORKSPACE_ROOT_WATCH_DEBOUNCE_MS)
+    }
+    let watcher: FSWatcher | undefined
+    try {
+      watcher = watch(canonicalRoot, { persistent: false }, () => { schedule() })
+    } catch (error) {
+      ctx.logger.warn(`workspace root '${canonicalRoot}' is not watchable; live refresh disabled: ${errorChain(error)}`)
+    }
+    const onAbort = (): void => { if (timer !== undefined) clearTimeout(timer) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    return () => {
+      if (timer !== undefined) clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      watcher?.close()
+    }
+  }
 
   /** The model returned nothing usable to name the directory. */
   class WorkspacePromptRejectedError extends Error {
@@ -2860,7 +2970,19 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       async create(request) {
         const { path } = request.payload
         try {
-          const { workspace, created } = await ensureWorkspace(path)
+          // Restricted-workspace deployment: every workspace is a direct child
+          // of the fixed root. Reject a path outside it so a hand-crafted client
+          // cannot register an arbitrary directory the sidebar never offered.
+          const canonicalRoot = await realpathNormalize(WORKSPACE_PROMPT_ROOT)
+          const canonical = await realpathNormalize(path)
+          if (canonical !== canonicalRoot && dirname(canonical) !== canonicalRoot) {
+            return err(request, {
+              code: 'workspace-invalid-path',
+              message: `workspaces must be a direct child of ${canonicalRoot}; "${path}" is outside it`,
+              details: { path },
+            })
+          }
+          const { workspace, created } = await ensureWorkspace(canonical)
           return ok(request, { workspace: workspaceView(workspace), created })
         } catch (error: unknown) {
           // The registry rejects a path that does not resolve to an existing
@@ -3792,5 +3914,7 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       pending.resolve(payload.answer)
       return Promise.resolve({ accepted: true })
     },
+
+    initWorkspaceRoot,
   }
 }

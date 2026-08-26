@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16,
-  IconProjectAddOutline16, IconSearchOutline16, IconSparkle16, Menu, Modal, Tooltip,
+  IconSearchOutline16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionId, SessionListState, SessionSearchResultItem, WorkspaceId, WorkspaceView,
@@ -23,7 +23,6 @@ import type { SessionNode, SessionOrderBy } from './tree.ts'
 import { deriveFlat, deriveGroups, deriveSearchResults, UNGROUPED_KEY } from './tree.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './rows/Rows.tsx'
 import { FLAT_SESSION_ORDER_KEY } from './stores.ts'
-import { WorkspacePickFlow } from './WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
 
 /**
@@ -757,22 +756,15 @@ export function WorkspaceBrowser({
   insertWorkspaceBefore,
   archiveSession,
   insertSessionBefore,
-  createWorkspace,
-  createWorkspaceFromPrompt,
   searchSessions,
   searchResultLimit,
-  useDirectoryFlow,
   useHostDescription,
-  renderSlot,
   t,
 }: WorkspaceBrowserProps) {
   const home = useHostDescription(description => description?.home)
   const workspaces = useWorkspaces(state => state.items)
   const workspacePhase = useWorkspaces(state => state.phase)
   const archivedSessionIds = useWorkspaces(state => state.archivedSessionIds)
-  // Live occupancy of this surface's directory-flow hole (the same source the
-  // flow reads): a composition without a picking affordance can add nothing.
-  const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
   const groupBy = useStore(s => s.groupBy)
   const orderBy = useStore(s => s.orderBy)
   const groupExpansion = useStore(s => s.groupExpansion)
@@ -824,44 +816,7 @@ export function WorkspaceBrowser({
   })
   const searchRoot = useRef<HTMLDivElement | null>(null)
   const searchInput = useRef<HTMLInputElement | null>(null)
-  // Section-header ＋ opens the picker menu (same popover in wide and rail
-  // states; the menu anchors on this button).
-  const [wsPickerOpen, setWsPickerOpen] = useState(false)
-  const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
-
-  // The "create a directory from a prompt" flow: a modal with a free-form
-  // description whose name the Host derives from its default model.
-  const [promptOpen, setPromptOpen] = useState(false)
-  const [promptText, setPromptText] = useState('')
-  const [promptBusy, setPromptBusy] = useState(false)
-  const [promptError, setPromptError] = useState<string | null>(null)
-  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
-
-  const openPromptFlow = (): void => {
-    setPromptText('')
-    setPromptError(null)
-    setPromptBusy(false)
-    setPromptOpen(true)
-  }
-
-  const submitPromptFlow = (): void => {
-    const text = promptText.trim()
-    if (text === '' || promptBusy) return
-    setPromptBusy(true)
-    setPromptError(null)
-    createWorkspaceFromPrompt({ prompt: text }).then(
-      (workspace) => {
-        setPromptOpen(false)
-        setPromptBusy(false)
-        startSession(workspace.workspaceId)
-      },
-      (reason: unknown) => {
-        setPromptBusy(false)
-        setPromptError(reason instanceof Error ? reason.message : String(reason))
-      },
-    )
-  }
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1055,7 +1010,6 @@ export function WorkspaceBrowser({
               ref={searchRoot}
               className={clsx(css.search, searchExpanded && css.searchExpanded)}
               onClick={() => {
-                setWsPickerOpen(false)
                 setSearchExpanded(true)
                 searchInput.current?.focus()
               }}
@@ -1067,7 +1021,6 @@ export function WorkspaceBrowser({
                   aria-label={t('search.sessions.aria')}
                   aria-expanded={searchExpanded}
                   onClick={() => {
-                    setWsPickerOpen(false)
                     setSearchExpanded(true)
                   }}
                 >
@@ -1116,97 +1069,10 @@ export function WorkspaceBrowser({
               t={t}
             />
           )}
-          {/* Adding is the button's one action, so a composition with no
-              picking affordance has nothing to offer here: the region hides the
-              button rather than leaving a dead one in the header. */}
-          {directoryFlowAvailable && (
-            <Tooltip label={t('workspace.add')} side="bottom" delayMs={500}>
-              <button
-                ref={wsPlusRef}
-                type="button"
-                className={css.iconButton}
-                aria-label={t('workspace.add')}
-                onClick={() => {
-                  setWsPickerOpen(v => !v)
-                }}
-              >
-                <IconProjectAddOutline16 size={wide ? 16 : 18} />
-              </button>
-            </Tooltip>
-          )}
-          {/* Create a brand-new directory from a description: independent of the
-              directory-flow hole, so it always renders. */}
-          <Tooltip label={t('workspace.createFromPrompt')} side="bottom" delayMs={500}>
-            <button
-              type="button"
-              className={css.iconButton}
-              aria-label={t('workspace.createFromPrompt')}
-              onClick={openPromptFlow}
-            >
-              <IconSparkle16 size={wide ? 16 : 18} />
-            </button>
-          </Tooltip>
+          {/* Restricted-workspace deployment: workspaces are minted only by the
+              agent under the fixed root, so the sidebar exposes no manual add
+              entry (neither directory pick nor prompt). */}
         </div>
-        {/* Add flow + its error dialog (same package — direct composition). */}
-        <WorkspacePickFlow
-          t={t}
-          open={wsPickerOpen}
-          anchorRef={wsPlusRef}
-          useWorkspaces={useWorkspaces}
-          createWorkspace={createWorkspace}
-          useDirectoryFlow={useDirectoryFlow}
-          renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
-          addOnly
-          side="right"
-          onPick={(workspaceId) => {
-            setWsPickerOpen(false)
-            startSession(workspaceId)
-          }}
-          onClose={() => { setWsPickerOpen(false) }}
-        />
-        {/* Create-from-prompt modal: the Host derives a directory name from the
-            default model, mints the directory under /workspaces/<name>, and
-            adopts it. */}
-        <Modal
-          open={promptOpen}
-          onClose={() => { setPromptOpen(false) }}
-          closeLabel={t('close')}
-          title={t('workspace.createFromPrompt.title')}
-          footer={(
-            <>
-              <Button variant="outline" className={css.modalAction} onClick={() => { setPromptOpen(false) }}>{t('cancel')}</Button>
-              <Button
-                variant="primary"
-                className={css.modalAction}
-                disabled={promptBusy || promptText.trim() === ''}
-                onClick={submitPromptFlow}
-              >
-                {promptBusy ? t('workspace.createFromPrompt.creating') : t('workspace.createFromPrompt.submit')}
-              </Button>
-            </>
-          )}
-        >
-          <div className={css.promptModalBody}>
-            <textarea
-              ref={promptInputRef}
-              className={css.promptTextarea}
-              value={promptText}
-              onChange={(event) => { setPromptText(event.target.value) }}
-              placeholder={t('workspace.createFromPrompt.placeholder')}
-              rows={5}
-              disabled={promptBusy}
-              autoFocus
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-                  event.preventDefault()
-                  submitPromptFlow()
-                }
-              }}
-            />
-            <p className={css.promptHint}>{t('workspace.createFromPrompt.hint')}</p>
-            {promptError !== null && <div className={css.modalError} role="alert">{promptError}</div>}
-          </div>
-        </Modal>
       </div>
 
       {/* The collapsed rail keeps search as its own 36px control. */}

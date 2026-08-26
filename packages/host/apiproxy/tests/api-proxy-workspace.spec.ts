@@ -105,6 +105,7 @@ async function harness(
   const api = createApiProxy(ctx, {
     defaultModelSelection: () => ({ provider: 'test', model: 'test-model' }),
     cwd: root,
+    workspaceRoot: root,
     ...extras.openPath === undefined ? {} : { openPath: extras.openPath },
     ...extras.canOpenPath === undefined ? {} : { canOpenPath: extras.canOpenPath },
   })
@@ -298,25 +299,17 @@ describe('workspace.create', () => {
     expect(existsSync(missing)).toBe(false)
   })
 
-  it('adopts different paths that derive the same Workspace title', async () => {
+  it('rejects a path that is not a direct child of the fixed root', async () => {
     const { api, root } = await harness()
-    const first = join(root, 'one', 'project')
-    const second = join(root, 'two', 'project')
-    mkdirSync(first, { recursive: true })
-    mkdirSync(second, { recursive: true })
-    const firstResult = expectOk(await api.workspace.create(request({ path: first })))
-    const secondResult = expectOk(await api.workspace.create(request({ path: second })))
-    expect(firstResult).toMatchObject({
-      created: true,
-      workspace: { path: first, title: 'project' },
-    })
-    expect(secondResult).toMatchObject({
-      created: true,
-      workspace: { path: second, title: 'project' },
-    })
-    expect(secondResult.workspace.workspaceId).not.toBe(firstResult.workspace.workspaceId)
-    expect(expectOk(await api.workspace.list(request({}))).items.map(workspace => workspace.path))
-      .toEqual([second, first])
+    const nested = join(root, 'one', 'project')
+    mkdirSync(nested, { recursive: true })
+    const nestedResult = await api.workspace.create(request({ path: nested }))
+    expect(nestedResult.result).toMatchObject({ ok: false, error: { code: 'workspace-invalid-path' } })
+    expect(expectOk(await api.workspace.list(request({}))).items).toHaveLength(0)
+
+    const direct = stageDir(root, 'project')
+    const directResult = expectOk(await api.workspace.create(request({ path: direct })))
+    expect(directResult).toMatchObject({ created: true, workspace: { path: direct, title: 'project' } })
   })
 })
 

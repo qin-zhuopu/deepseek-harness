@@ -3107,6 +3107,8 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
     downloads: {
       sessionLog: () => Promise.resolve(new Response('fixture mode does not serve session export', { status: 404 })),
     },
+    // Fixture mode has no host filesystem; the root watcher is a no-op.
+    initWorkspaceRoot: () => Promise.resolve(() => {}),
   }
 
   const rpc: ClientConnectionRpc = {

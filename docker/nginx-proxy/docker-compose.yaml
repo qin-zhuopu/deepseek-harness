@@ -1,0 +1,57 @@
+# gb10 web 服务统一编排：nginx-proxy 反代所有带 VIRTUAL_HOST 的 web 容器，
+# 通配证书 *.gb10.zhuopu.net 走 HTTPS。dsh-aio 从原 --network host 迁到
+# 本 compose 的 bridge 网络（webproxy），front-proxy 只需连容器内 loopback，
+# 8080 经 bridge 暴露给 nginx-proxy。
+#
+# 部署位置：gb10 (10.202.200.139) 的 ~/nginx-proxy/。证书不入库，
+# 从 <godaddy/certs>/_wildcard.gb10.zhuopu.net/ 复制到 ~/nginx-proxy/certs/
+# 并按 nginx-proxy 约定命名：fullchain.pem→gb10.zhuopu.net.crt、
+# privkey.pem→gb10.zhuopu.net.key（key chmod 600）。
+#
+# 用法（在 ~/nginx-proxy/）：
+#   cp .env.example .env && vi .env   # 填 DSH_IMAGE / NR_API_KEY，chmod 600
+#   docker compose config             # 校验
+#   docker compose up -d              # 启动/接管
+#
+# NR_API_KEY 等放 .env（chmod 600），compose 自动读取。
+
+services:
+  nginx-proxy:
+    image: harbor.jereh.cn/base/nginx-proxy:latest
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - ./certs:/etc/nginx/certs:ro
+    networks:
+      - webproxy
+
+  dsh-aio:
+    image: ${DSH_IMAGE:?请在 .env 里指定 DSH_IMAGE}
+    container_name: dsh-aio
+    restart: unless-stopped
+    shm_size: 1g
+    environment:
+      # 反代：nginx-proxy 按 VIRTUAL_HOST 建 vhost，转发到容器 8080
+      - VIRTUAL_HOST=dsh.gb10.zhuopu.net
+      - VIRTUAL_PORT=8080
+      - HTTPS_METHOD=redirect
+      # front-proxy 单端口聚合（dsh web/noVNC/resize 都在容器内 loopback）
+      - FRONT_PORT=8080
+      - VNC_PUBLIC_URL=/vnc
+      - RESIZE_ENDPOINT=/resize
+      # /api 浏览器信任栅栏放行的 Origin/Host
+      - TRUSTED_HOSTS=dsh.gb10.zhuopu.net
+      - SCREEN_GEOMETRY=${SCREEN_GEOMETRY:-576x1440x24}
+      # LLM 凭据（litellm.jereh.cn，见 .env）
+      - NR_API_KEY=${NR_API_KEY:-}
+    networks:
+      - webproxy
+
+networks:
+  webproxy:
+    name: webproxy
+    driver: bridge

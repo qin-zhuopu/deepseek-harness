@@ -40,3 +40,7 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# gb10 nginx-proxy 部署：本地证书与 .env 不入库（私钥严禁提交）
+docker/nginx-proxy/certs/
+docker/nginx-proxy/.env

@@ -187,4 +187,18 @@ fi
 # DEV: run the tsx source dispatch (transpiles TypeScript at runtime).
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (tsx source dispatch)"
 cd /app
+
+# Hot reload for the web client: `dsh web` stat-polls the bundles it serves and
+# broadcasts `rebuilt` frames; `dev:web` is the watch-build that rewrites those
+# bundles on source edits (scripts/dev-web.ts). Poll mode because container
+# filesystems often deliver no inotify events. Disable with DEV_WATCH=0.
+if [ "${DEV_WATCH:-1}" = 1 ]; then
+  log "dev:web watch-build enabled (DEV_WATCH=1; edits under /app hot-reload the web UI)"
+  (pnpm dev:web --poll >> /tmp/dev-web.log 2>&1 &)
+else
+  log "dev:web watch-build disabled (DEV_WATCH=0; serving the baked bundles)"
+fi
+
+# Server-side (host face) edits still need a restart: tsx transpiles once at
+# boot. Restart the container (or `docker restart`) to pick those up.
 exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

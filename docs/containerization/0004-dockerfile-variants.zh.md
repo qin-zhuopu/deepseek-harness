@@ -177,6 +177,7 @@ docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
 | 变量 | 默认值 | 用途 |
 |------|--------|------|
 | `NR_API_KEY` | — | LLM 凭据;唯一必填项。 |
+| `DEV_WATCH` | `1` | 仅 dev 镜像:在 `dsh web` 旁运行 `pnpm dev:web --poll`,改 `/app` 下的 web 客户端源码即热更新页面(`dsh web` 轮询所服务的 bundle 并广播 `rebuilt`)。`0` 则只服务镜像内已构建的产物。host 面(服务端)源码改动仍需重启容器。 |
 | `SCREEN_GEOMETRY` | `576x1440x24` | 初始桌面尺寸(之后 sidecar 会把它跟视口对齐)。 |
 | `BIND_ADDR` | `127.0.0.1` | websockify 与 CDP 的监听地址。**移不动 dsh web** —— 它拒绝任何非回环绑定（见下），那种场景请用 `FRONT_PORT`。 |
 | `FRONT_PORT` | — | 启用 `front-proxy.js`：一个可路由端口按路径分发到三个 loopback 服务。走反向代理时必须设置。留空 = 关闭。 |

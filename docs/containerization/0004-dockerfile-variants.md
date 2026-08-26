@@ -204,6 +204,7 @@ The one behavioral difference is the [Landlock launcher](../../native/landlock-r
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `NR_API_KEY` | — | LLM credential; the only required one. |
+| `DEV_WATCH` | `1` | Dev image only: runs `pnpm dev:web --poll` alongside `dsh web`, so edits to the web client source under `/app` hot-reload the served page (`dsh web` stat-polls the bundles and broadcasts `rebuilt`). `0` serves the baked bundles. Host-face (server) edits still need a container restart. |
 | `SCREEN_GEOMETRY` | `576x1440x24` | Initial desktop size (the sidecar resizes it to the viewport afterwards). |
 | `BIND_ADDR` | `127.0.0.1` | Listen address for websockify and CDP. **Does not move dsh web**, which refuses any non-loopback bind (see below); use `FRONT_PORT` for that. |
 | `FRONT_PORT` | — | Enables `front-proxy.js`: one routable port that fans out to all three loopback services. Required behind a reverse proxy. Empty = off. |

@@ -74,12 +74,62 @@ done
 log() { printf '\033[1;34m[ci-dsh-aio-arm64]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[ci-dsh-aio-arm64] ERROR\033[0m %s\n' "$*" >&2; exit 1; }
 
-[ -n "${SSH_KEY:-}" ] && SSH_KEY_ARGS=(-i "$SSH_KEY")
+# 密钥处理：$HOME 下的密钥直接用（权限正常）；从别的路径（如 WSL 的
+# /mnt/* drvfs，权限恒 0777 会被 ssh 以 "too open" 拒用）回退找到的密钥，
+# 先拷到 mktemp 临时文件（git-bash 与 WSL 都落在原生 fs）收紧成 600 再用。
+handle_ssh_key() {
+  if [ -n "${SSH_KEY:-}" ]; then
+    case "$SSH_KEY" in
+      "$HOME"/*) : ;;
+      *)
+        SSH_KEY_COPY="$(mktemp 2>/dev/null || echo "/tmp/dsh-ci-id-$$")"
+        if cp -f "$SSH_KEY" "$SSH_KEY_COPY" && chmod 600 "$SSH_KEY_COPY"; then
+          SSH_KEY="$SSH_KEY_COPY"
+        else
+          log "警告: 密钥复制失败，按原路径使用 $SSH_KEY"
+        fi ;;
+    esac
+  fi
+  [ -n "${SSH_KEY:-}" ] && SSH_KEY_ARGS=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+}
+SSH_CMD="${USER_NAME}@${HOST}"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "请在仓库内运行。"
 command -v tar >/dev/null || die "本地缺 tar。"
+
+# 私钥探测：当前 shell 的 HOME 可能不是真实用户目录（如 WSL 下 HOME=/root
+# 没有密钥），除 $HOME/.ssh 外，再试仓库向上 4 级（<home>/repo/<org>/<repo>/
+# 本仓库）的用户 .ssh，并同时兼容 git-bash 的 /c/... 与 WSL 的 /mnt/c/...
+# 两种盘符路径。找到就以 -i 显式指定，避免认证漂移。
+if [ -z "${SSH_KEY:-}" ]; then
+  GUESSED_HOME="$(cd "$REPO_ROOT/../../../.." 2>/dev/null && pwd || true)"
+  TWIN_HOME=""
+  case "$GUESSED_HOME" in
+    /c/*)          TWIN_HOME="/mnt${GUESSED_HOME}" ;;
+    /mnt/c/*)      TWIN_HOME="${GUESSED_HOME#/mnt}" ;;
+  esac
+  for k in "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_ed25519" \
+           "${GUESSED_HOME:-/nonexistent}/.ssh/id_rsa" "${GUESSED_HOME:-/nonexistent}/.ssh/id_ed25519" \
+           "${TWIN_HOME:-/nonexistent}/.ssh/id_rsa"   "${TWIN_HOME:-/nonexistent}/.ssh/id_ed25519"; do
+    if [ -f "$k" ]; then SSH_KEY="$k"; break; fi
+  done
+fi
+handle_ssh_key   # 探测完成后处理复制/权限并生成 SSH_KEY_ARGS
+# ssh 公共参数（不使用 ControlMaster：Windows OpenSSH 不支持连接复用）
+SSH_OPTS=(-o BatchMode=yes -o ConnectTimeout=10 "${SSH_KEY_ARGS[@]}")
+log "ssh 私钥: ${SSH_KEY:-（未探测到，依赖默认）}  HOME=$HOME"
+
+# 预检：ssh 可达才继续，偶发 Permission denied 重试 3 次
+for attempt in 1 2 3; do
+  if err="$(ssh "${SSH_OPTS[@]}" "$SSH_CMD" 'true' 2>&1)"; then break; fi
+  if [ "$attempt" = 3 ]; then
+    ssh -v "${SSH_OPTS[@]}" "$SSH_CMD" 'true' 2>&1 | grep -E 'Offering|accepts|denied|Authenticat|identity file|too open|Load key' || true
+    die "ssh 连不上 $SSH_CMD：$err"
+  fi
+  log "ssh 预检失败（$err），${attempt}0 秒后重试($attempt/3)…"; sleep "${attempt}0"
+done
 
 COMMIT_SHORT="$(git rev-parse --short HEAD)"
 SSH_CMD="${USER_NAME}@${HOST}"
@@ -91,16 +141,16 @@ log "目标: $SSH_CMD:$REMOTE_DIR  源码提交: $COMMIT_SHORT  推送: $([ "$PU
 # ── 1. 同步 .git 到构建机并 checkout 工作树 ────────────────────────────
 log "1/3 同步 .git 到 $SSH_CMD:$REMOTE_DIR（本地提交 $COMMIT_SHORT）"
 if [ "$KEEP" = 0 ]; then
-  ssh -o BatchMode=yes "${SSH_KEY_ARGS[@]}" "$SSH_CMD" "rm -rf '$REMOTE_DIR' && mkdir -p '$REMOTE_DIR'"
+  ssh "${SSH_OPTS[@]}" "$SSH_CMD" "rm -rf '$REMOTE_DIR' && mkdir -p '$REMOTE_DIR'"
 else
-  ssh -o BatchMode=yes "${SSH_KEY_ARGS[@]}" "$SSH_CMD" "mkdir -p '$REMOTE_DIR'"
+  ssh "${SSH_OPTS[@]}" "$SSH_CMD" "mkdir -p '$REMOTE_DIR'"
 fi
 COMMIT="$(git rev-parse HEAD)"
-tar -cf - .git | ssh -o BatchMode=yes "${SSH_KEY_ARGS[@]}" "$SSH_CMD" "tar -xf - -C '$REMOTE_DIR'"
+tar -cf - .git | ssh "${SSH_OPTS[@]}" "$SSH_CMD" "tar -xf - -C '$REMOTE_DIR'"
 # checkout 出干净工作树：autocrlf 关掉（Windows 的 .git/config 可能带
 # autocrlf=true，会让 Linux checkout 出 CRLF 文件烤进镜像）；-f 覆盖旧
 # 树，clean -fdx 清掉上次构建的残留
-ssh -o BatchMode=yes "${SSH_KEY_ARGS[@]}" "$SSH_CMD" \
+ssh "${SSH_OPTS[@]}" "$SSH_CMD" \
   "cd '$REMOTE_DIR' && git config core.autocrlf false && git checkout -f '$COMMIT' && git clean -fdx"
 
 # ── 2. 在构建机上构建（必要时推送） ─────────────────────────────────────
@@ -111,7 +161,7 @@ if [ -n "${HARBOR_USERNAME:-}" ] && [ -n "${HARBOR_PASSWORD:-}" ]; then
 fi
 
 # shellcheck disable=SC2086
-ssh -o BatchMode=yes "${SSH_KEY_ARGS[@]}" "$SSH_CMD" \
+ssh "${SSH_OPTS[@]}" "$SSH_CMD" \
   "cd '$REMOTE_DIR' && HARBOR='$REGISTRY' $HARBOR_ENV bash docker/build-dsh-aio-dev-arm64.sh $PUSH_ARG"
 
 log "3/3 完成"

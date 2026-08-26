@@ -57,6 +57,20 @@ export interface WorkspaceApi {
   Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>>
 
   /**
+   * Creates one brand-new workspace from a natural-language description (the
+   * "new directory from prompt" flow). The Host asks its configured default
+   * model to derive a short, filesystem-safe directory name from `prompt`,
+   * creates the directory at the fixed workspace root `/workspaces/<name>`,
+   * and adopts it as a Workspace. A name collision with an existing entry at
+   * the root is resolved by suffixing a numeric counter (`name-2`, `name-3`,
+   * …). Failures return `workspace-prompt-unavailable` (no LLM/root failed),
+   * `workspace-prompt-rejected` (the model produced no usable name), or
+   * `workspace-invalid-path` (the directory could not be created).
+   */
+  createFromPrompt(request: RpcRequest<{ prompt: string }>, signal?: AbortSignal):
+  Promise<RpcResponse<{ workspace: WorkspaceView; created: true }>>
+
+  /**
    * Renames a workspace. `title` is trimmed and must be non-empty
    * (schema-enforced). An unknown id fails with `workspace-not-found`; a
    * title equal to another workspace's fails with `workspace-name-conflict`.

@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { z as zod } from 'zod'
 import type { Context } from '@deepseek-ai/cordis'
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
@@ -14,9 +14,9 @@ import type { Agent, ModelSelection, ModelSelectionRef, AgentOptions, AgentStatu
 import type {} from '@deepseek-ai/dsh-agent-presets/types'
 import { AttachmentError, admitEncodedImages } from '@deepseek-ai/dsh-attachment'
 import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
-import { createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import { BlockAssembler, createUserMessage, freezeMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { errorChain } from '@deepseek-ai/dsh-llm'
-import type { ContentBlock, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock, GenerateOptions, Message, MessageSource } from '@deepseek-ai/dsh-llm'
 import { isAppendSurfaceEvent, isJsonValue } from '@deepseek-ai/dsh-session'
 import type { JsonValue, Session, SessionEvent, SessionEventMap, SessionHeader, SessionId, UserMessage } from '@deepseek-ai/dsh-session'
 import type { SessionPersistence } from '@deepseek-ai/dsh-session-persistence'
@@ -1039,6 +1039,21 @@ function changedWorkspaceView(workspaceId: string, value: unknown): WorkspaceVie
 }
 
 /**
+ * Normalize free model text into a single safe POSIX directory segment.
+ * Lowercases, collapses whitespace to a hyphen, drops every character outside
+ * `[a-z0-9_-]`, trims leading/trailing separators, and caps the length.
+ * Returns '' when nothing usable remains.
+ */
+function sanitizeDirectoryName(text: string): string {
+  return text.trim().toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 40)
+}
+
+/**
  * Implement ApiProxy over a composed host context.
  * @param ctx - a context with the Host spine and Workspace registry mounted.
  * @param defaults - host routing and project-directory defaults.
@@ -1656,6 +1671,141 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     })
     workspaceCreationChain = operation.then(() => undefined, () => undefined)
     return operation
+  }
+
+  /** The fixed root under which prompt-created workspaces are minted. A Linux-container deployment convention (`/workspaces/<name>`). */
+  const WORKSPACE_PROMPT_ROOT = '/workspaces'
+
+  /** The model returned nothing usable to name the directory. */
+  class WorkspacePromptRejectedError extends Error {
+    constructor() {
+      super('the model produced no usable workspace directory name')
+      this.name = 'WorkspacePromptRejectedError'
+    }
+  }
+
+  /**
+   * Ask the Host's configured default model to derive a short, filesystem-safe
+   * directory name from a free-form description.
+   * @param prompt - the operator's trimmed description.
+   * @param signal - cancels the model request with the caller.
+   * @returns a normalized single POSIX path segment.
+   */
+  async function generateWorkspaceNameFromPrompt(prompt: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted()
+    const selection = defaults.defaultModelSelection()
+    const resolved = await ctx.llm.resolveCallConfig(
+      { provider: selection.provider, model: selection.model },
+      signal,
+    )
+    const system = [
+      'You derive a short directory (folder) name for a development workspace from the user\'s description.',
+      'Return ONLY the directory name on one line: lowercase kebab-case or snake_case. No spaces, slashes, dots, quotes, punctuation, Markdown, or explanation.',
+      'Use ASCII letters, digits, hyphens, and underscores only. At most 40 characters.',
+    ].join('\n')
+    const messages: Message[] = [createUserMessage({
+      content: [{ type: 'text', text: `Directory name for this workspace description:\n${prompt}` }],
+      source: { kind: 'plugin', plugin: 'dsh-host-apiproxy' },
+    })]
+    const options: GenerateOptions = {
+      provider: resolved.provider,
+      model: resolved.model,
+      messages,
+      system,
+      maxTokens: 16,
+      purpose: 'workspace-create-from-prompt',
+      ...signal === undefined ? {} : { signal },
+    }
+    const assembler = new BlockAssembler()
+    for await (const chunk of ctx.llm.stream(options)) assembler.push(chunk)
+    const text = assembler.blocks()
+      .filter(block => block.type === 'text')
+      .map(block => block.text)
+      .join(' ')
+    const name = sanitizeDirectoryName(text)
+    if (name === '') throw new WorkspacePromptRejectedError()
+    return name
+  }
+
+  /**
+   * Create a brand-new directory under the fixed root, disambiguating an
+   * existing entry by appending a numeric counter (`<name>-2`, `<name>-3`, …).
+   * @throws on any filesystem failure other than a collision.
+   */
+  async function createPromptWorkspaceDirectory(name: string): Promise<string> {
+    await mkdir(WORKSPACE_PROMPT_ROOT, { recursive: true })
+    const candidate = join(WORKSPACE_PROMPT_ROOT, name)
+    let attempt: string = candidate
+    for (let suffix = 1; suffix < 1000; suffix += 1) {
+      try {
+        await mkdir(attempt)
+        return attempt
+      } catch (error: unknown) {
+        // A name the registry already owns is a collision to dedupe, exactly
+        // as if a sibling directory sat there — never reuse a taken path.
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'EEXIST') {
+          attempt = suffix === 1 ? join(WORKSPACE_PROMPT_ROOT, `${name}-2`) : join(WORKSPACE_PROMPT_ROOT, `${name}-${suffix + 1}`)
+          continue
+        }
+        throw error
+      }
+    }
+    throw new Error(`could not allocate a unique directory under ${WORKSPACE_PROMPT_ROOT} for "${name}"`)
+  }
+
+  /**
+   * Create a fresh workspace from a natural-language description: derive a
+   * name with the default model, mint the directory under the fixed root, and
+   * adopt it. Errors map to stable wire codes by stage.
+   */
+  async function createWorkspaceFromPrompt(
+    request: RpcRequest<{ prompt: string }>, signal?: AbortSignal,
+  ): Promise<RpcResponse<{ workspace: WorkspaceView; created: true }>> {
+    let name: string
+    try {
+      name = await generateWorkspaceNameFromPrompt(request.payload.prompt.trim(), signal)
+    } catch (error: unknown) {
+      if (signal?.aborted === true) {
+        return err(request, { code: 'cancelled', message: 'workspace-from-prompt was cancelled', details: {} })
+      }
+      if (error instanceof WorkspacePromptRejectedError) {
+        return err(request, {
+          code: 'workspace-prompt-rejected',
+          message: error.message,
+          details: { prompt: request.payload.prompt },
+        })
+      }
+      return err(request, {
+        code: 'workspace-prompt-unavailable',
+        message: `workspace-name generation failed: ${error instanceof Error ? error.message : String(error)}`,
+        details: {},
+      })
+    }
+    let path: string
+    try {
+      path = await createPromptWorkspaceDirectory(name)
+    } catch (error: unknown) {
+      if (signal?.aborted === true) {
+        return err(request, { code: 'cancelled', message: 'workspace-from-prompt was cancelled', details: {} })
+      }
+      const target = join(WORKSPACE_PROMPT_ROOT, name)
+      return err(request, {
+        code: 'workspace-invalid-path',
+        message: `cannot create the "${name}" directory under ${WORKSPACE_PROMPT_ROOT}: ${error instanceof Error ? error.message : String(error)}`,
+        details: { path: target },
+      })
+    }
+    try {
+      const { workspace } = await ensureWorkspace(path)
+      return ok(request, { workspace: workspaceView(workspace), created: true })
+    } catch (error: unknown) {
+      return err(request, {
+        code: 'workspace-invalid-path',
+        message: `cannot adopt the created workspace at "${path}": ${error instanceof Error ? error.message : String(error)}`,
+        details: { path },
+      })
+    }
   }
 
   /**
@@ -2722,6 +2872,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
             details: { path },
           })
         }
+      },
+
+      async createFromPrompt(request, signal) {
+        return createWorkspaceFromPrompt(request, signal)
       },
 
       async rename(request) {

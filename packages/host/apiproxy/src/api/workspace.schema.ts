@@ -42,6 +42,20 @@ export const workspaceCreateValueSchema = z.object({
   created: z.boolean(),
 }) satisfies z.ZodType<Wire<ResponseValue<'workspace.create'>>>
 
+/** workspace.createFromPrompt request payload: the operator's description. */
+export const workspaceCreateFromPromptRequestSchema = z.object({
+  prompt: z.string(),
+}).refine(
+  payload => payload.prompt.trim() !== '',
+  { message: 'workspace.createFromPrompt requires a non-blank prompt' },
+) satisfies z.ZodType<Wire<RequestPayload<'workspace.createFromPrompt'>>>
+
+/** workspace.createFromPrompt response value. */
+export const workspaceCreateFromPromptValueSchema = z.object({
+  workspace: workspaceViewSchema,
+  created: z.literal(true),
+}) satisfies z.ZodType<Wire<ResponseValue<'workspace.createFromPrompt'>>>
+
 /** workspace.rename request payload: the new title must be non-blank. */
 export const workspaceRenameRequestSchema = z.object({
   workspaceId: workspaceIdSchema,

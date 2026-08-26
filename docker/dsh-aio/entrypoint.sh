@@ -91,24 +91,29 @@ fi
 
 # The VNC-preview plugin reads window.__DSH_VNC_PREVIEW_URL__; setting it in
 # the served index.html is the container-baked-script path that plugin
-# documents. Idempotent: the marker comment keeps a restart from stacking
-# injections, and the whole block is skipped when VNC_PUBLIC_URL is empty.
+# documents. Reusable because `dev:web` (DEV_WATCH) rebuilds apps/web/dist and
+# drops the injection — a background loop below re-applies it. Idempotent: the
+# marker comment keeps a restart or the loop from stacking injections.
 WEB_INDEX=/app/apps/web/dist/index.html
-if [ -n "${VNC_PUBLIC_URL}" ] && [ -f "${WEB_INDEX}" ]; then
+VNC_MARKER='dsh-vnc-preview-url'
+inject_vnc_preview() {
+  [ -n "${VNC_PUBLIC_URL}" ] && [ -f "${WEB_INDEX}" ] || return 0
   VNC_PUBLIC_URL="${VNC_PUBLIC_URL%/}" \
   python3 - "${WEB_INDEX}" <<'PY'
-import json, os, re, sys
+import json, os, sys
 
 path = sys.argv[1]
 url = os.environ['VNC_PUBLIC_URL'] + '/vnc.html?autoconnect=true&resize=scale'
 marker = '<!--dsh-vnc-preview-url-->'
-tag = f'{marker}<script>window.__DSH_VNC_PREVIEW_URL__={json.dumps(url)};</script>'
-
 html = open(path, encoding='utf-8').read()
-# Drop any previous injection before adding the current one.
-html = re.sub(re.escape(marker) + r'<script>.*?</script>', '', html, flags=re.S)
+if marker in html:  # already injected (restart or re-inject loop) — leave it
+    sys.exit(0)
+tag = f'{marker}<script>window.__DSH_VNC_PREVIEW_URL__={json.dumps(url)};</script>'
 open(path, 'w', encoding='utf-8').write(html.replace('</head>', tag + '</head>', 1))
 PY
+}
+if [ -n "${VNC_PUBLIC_URL}" ]; then
+  inject_vnc_preview
   log "vnc preview url: ${VNC_PUBLIC_URL}/vnc.html"
 fi
 
@@ -195,6 +200,17 @@ cd /app
 if [ "${DEV_WATCH:-1}" = 1 ]; then
   log "dev:web watch-build enabled (DEV_WATCH=1; edits under /app hot-reload the web UI)"
   (pnpm dev:web --poll >> /tmp/dev-web.log 2>&1 &)
+  # dev:web rewrites apps/web/dist on every rebuild, dropping the VNC-preview
+  # injection. Re-apply it whenever the marker goes missing (inject_vnc_preview
+  # is a no-op once the marker is present, so this is cheap).
+  if [ -n "${VNC_PUBLIC_URL}" ]; then
+    (
+      while true; do
+        grep -q "${VNC_MARKER}" "${WEB_INDEX}" 2>/dev/null || inject_vnc_preview
+        sleep 2
+      done
+    ) &
+  fi
 else
   log "dev:web watch-build disabled (DEV_WATCH=0; serving the baked bundles)"
 fi

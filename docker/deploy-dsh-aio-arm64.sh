@@ -2,11 +2,14 @@
 # =====================================================================
 # 部署 dsh-aio (arm64) 到 gb10 并验证部署成功。
 #
-# 用法（在仓库根目录或任意位置）：
-#   ./docker/deploy-dsh-aio-arm64.sh                       # 部署 harbor 最新的 dev-arm64
+# 用法（在仓库根目录，需在 git 仓库内以推导镜像 tag）：
+#   ./docker/deploy-dsh-aio-arm64.sh                       # 部署当前 HEAD 对应的 dev-arm64-<sha>
 #   ./docker/deploy-dsh-aio-arm64.sh -i harbor.jereh.cn/base/dsh-aio:dev-arm64-9ff7bd92c0
 #   ./docker/deploy-dsh-aio-arm64.sh --info                # 查询当前部署的构建tag+部署时间
 #   ./docker/deploy-dsh-aio-arm64.sh -h                    # 全部参数
+#
+# 默认镜像用当前 git HEAD 的短哈希拼成内容确定的 tag（dev-arm64-<sha>），
+# 不用会被覆盖的滚动 tag dev-arm64——避免 docker pull 命中同名旧 digest 缓存。
 #
 # 部署信息接口：构建 tag 与部署时间以环境变量 DEPLOY_IMAGE / DEPLOY_TS
 # 注入容器，随时可在构建机上读取：
@@ -25,7 +28,7 @@ usage() {
 选项:
   -H, --host HOST       部署目标机            (默认: 10.202.200.139)
   -u, --user USER       ssh 用户              (默认: jereh)
-  -i, --image REF       部署的镜像            (默认: harbor.jereh.cn/base/dsh-aio:dev-arm64)
+  -i, --image REF       部署的镜像            (默认: dev-arm64-<当前HEAD短哈希>)
   -n, --name NAME       容器名                (默认: dsh-aio)
   -p, --port PORT       dsh web 端口          (默认: 3080)
   -d, --domain DOMAIN   绑定域名（*.gb10.zhuopu.net 已解析到本机），
@@ -41,7 +44,7 @@ EOF
 
 HOST="10.202.200.139"
 USER_NAME="jereh"
-IMAGE="harbor.jereh.cn/base/dsh-aio:dev-arm64"
+IMAGE=""   # 默认由当前 git HEAD 推导 dev-arm64-<sha>（见下），-i 可覆盖
 NAME="dsh-aio"
 PORT="3080"
 INFO_ONLY=0
@@ -62,6 +65,13 @@ done
 
 log() { printf '\033[1;34m[deploy-aio]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[deploy-aio] ERROR\033[0m %s\n' "$*" >&2; exit 1; }
+
+# 未显式 -i 时，用当前 git HEAD 的短哈希拼出内容确定的 tag（dev-arm64-<sha>），
+# 而不是会被覆盖的滚动 tag dev-arm64——避免 docker pull 命中同名旧 digest 缓存。
+if [ -z "$IMAGE" ]; then
+  SHA="$(git rev-parse --short HEAD 2>/dev/null)" || die "不在 git 仓库内，无法推导镜像 tag；请用 -i 指定。"
+  IMAGE="harbor.jereh.cn/base/dsh-aio:dev-arm64-$SHA"
+fi
 
 SSH_CMD="${USER_NAME}@${HOST}"
 # 密钥探测/处理与 ci-dsh-aio-arm64.sh 相同（兼容 git-bash 与 WSL 执行环境）

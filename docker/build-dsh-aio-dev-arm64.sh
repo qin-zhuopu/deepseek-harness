@@ -70,6 +70,8 @@ log "3/3 构建 dsh-aio:dev"
 docker build \
   --build-arg "CHROME_BASE_IMAGE=dsh-chrome-base:24.04" \
   --build-arg "DSH_IMAGE=dsh:dev" \
+  --build-arg "DSH_CLIENT_COMMIT_HASH=$COMMIT" \
+  --build-arg "DSH_BUILD_TS=$BUILD_TS" \
   -t dsh-aio:dev-arm64 \
   -t "dsh-aio:dev-arm64-$COMMIT_SHORT" \
   -f docker/dsh-aio/Dockerfile \

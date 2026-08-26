@@ -65,6 +65,8 @@ log "2/2 构建 dsh-aio:dev"
 docker build \
   --build-arg "CHROME_BASE_IMAGE=$CHROME_BASE_IMAGE" \
   --build-arg "DSH_IMAGE=dsh:dev-amd64" \
+  --build-arg "DSH_CLIENT_COMMIT_HASH=$COMMIT" \
+  --build-arg "DSH_BUILD_TS=$BUILD_TS" \
   -t dsh-aio:dev-amd64 \
   -t "dsh-aio:dev-amd64-$COMMIT_SHORT" \
   -f docker/dsh-aio/Dockerfile \

@@ -73,6 +73,15 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV DSH_HOME=/root/.dsh
+
+# Build provenance for GET /deploy-info. Baked into the dsh:dev stage as ENV,
+# but the runtime stage is a fresh FROM, so ENV does not cross — re-declare and
+# have the build scripts pass the same values through.
+ARG DSH_CLIENT_COMMIT_HASH=unknown
+ENV DSH_CLIENT_COMMIT_HASH=${DSH_CLIENT_COMMIT_HASH}
+ARG DSH_BUILD_TS=unknown
+ENV DSH_BUILD_TS=${DSH_BUILD_TS}
+
 # dsh web (3080), noVNC (6080), resize sidecar (6081), raw VNC (5900),
 # CDP (9222), front-proxy (8080, only when FRONT_PORT is set)
 EXPOSE 3080 6080 6081 5900 9222 8080

@@ -102,10 +102,12 @@ export function apply(ctx: ClientContext): void {
       await ctx.workspaces.insertSessionBefore(workspaceId, sessionId, beforeSessionId)
     },
     createWorkspace: input => ctx.workspaces.create(input),
+    createWorkspaceFromPrompt: input => ctx.workspaces.createFromPrompt(input),
     hooks: { directoryFlow: browserFlowSource, hostDescription },
   })
   const pickerInjected = (): WorkspacePickerInjected => ({
     createWorkspace: input => ctx.workspaces.create(input),
+    createWorkspaceFromPrompt: input => ctx.workspaces.createFromPrompt(input),
     hooks: { directoryFlow: pickerFlowSource },
   })
   // Each registration declares its directory-flow child in the same call;

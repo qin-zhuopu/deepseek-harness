@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   Button, IconCloseFill14, IconPersonalizationOutline16,
-  IconProjectAddOutline16, IconSearchOutline16, Menu, Modal, Tooltip,
+  IconProjectAddOutline16, IconSearchOutline16, IconSparkle16, Menu, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionId, SessionListState, SessionSearchResultItem, WorkspaceId, WorkspaceView,
@@ -758,6 +758,7 @@ export function WorkspaceBrowser({
   archiveSession,
   insertSessionBefore,
   createWorkspace,
+  createWorkspaceFromPrompt,
   searchSessions,
   searchResultLimit,
   useDirectoryFlow,
@@ -828,6 +829,39 @@ export function WorkspaceBrowser({
   const [wsPickerOpen, setWsPickerOpen] = useState(false)
   const wsPlusRef = useRef<HTMLButtonElement>(null)
   const composingRef = useRef(false)
+
+  // The "create a directory from a prompt" flow: a modal with a free-form
+  // description whose name the Host derives from its default model.
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [promptText, setPromptText] = useState('')
+  const [promptBusy, setPromptBusy] = useState(false)
+  const [promptError, setPromptError] = useState<string | null>(null)
+  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const openPromptFlow = (): void => {
+    setPromptText('')
+    setPromptError(null)
+    setPromptBusy(false)
+    setPromptOpen(true)
+  }
+
+  const submitPromptFlow = (): void => {
+    const text = promptText.trim()
+    if (text === '' || promptBusy) return
+    setPromptBusy(true)
+    setPromptError(null)
+    createWorkspaceFromPrompt({ prompt: text }).then(
+      (workspace) => {
+        setPromptOpen(false)
+        setPromptBusy(false)
+        startSession(workspace.workspaceId)
+      },
+      (reason: unknown) => {
+        setPromptBusy(false)
+        setPromptError(reason instanceof Error ? reason.message : String(reason))
+      },
+    )
+  }
 
   // Rail search = expand + land in the search box: the flag arms before the
   // expand request; once the shell flips wide the input mounts and takes focus.
@@ -1100,6 +1134,18 @@ export function WorkspaceBrowser({
               </button>
             </Tooltip>
           )}
+          {/* Create a brand-new directory from a description: independent of the
+              directory-flow hole, so it always renders. */}
+          <Tooltip label={t('workspace.createFromPrompt')} side="bottom" delayMs={500}>
+            <button
+              type="button"
+              className={css.iconButton}
+              aria-label={t('workspace.createFromPrompt')}
+              onClick={openPromptFlow}
+            >
+              <IconSparkle16 size={wide ? 16 : 18} />
+            </button>
+          </Tooltip>
         </div>
         {/* Add flow + its error dialog (same package — direct composition). */}
         <WorkspacePickFlow
@@ -1118,6 +1164,49 @@ export function WorkspaceBrowser({
           }}
           onClose={() => { setWsPickerOpen(false) }}
         />
+        {/* Create-from-prompt modal: the Host derives a directory name from the
+            default model, mints the directory under /workspaces/<name>, and
+            adopts it. */}
+        <Modal
+          open={promptOpen}
+          onClose={() => { setPromptOpen(false) }}
+          closeLabel={t('close')}
+          title={t('workspace.createFromPrompt.title')}
+          footer={(
+            <>
+              <Button variant="outline" className={css.modalAction} onClick={() => { setPromptOpen(false) }}>{t('cancel')}</Button>
+              <Button
+                variant="primary"
+                className={css.modalAction}
+                disabled={promptBusy || promptText.trim() === ''}
+                onClick={submitPromptFlow}
+              >
+                {promptBusy ? t('workspace.createFromPrompt.creating') : t('workspace.createFromPrompt.submit')}
+              </Button>
+            </>
+          )}
+        >
+          <div className={css.promptModalBody}>
+            <textarea
+              ref={promptInputRef}
+              className={css.promptTextarea}
+              value={promptText}
+              onChange={(event) => { setPromptText(event.target.value) }}
+              placeholder={t('workspace.createFromPrompt.placeholder')}
+              rows={5}
+              disabled={promptBusy}
+              autoFocus
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  submitPromptFlow()
+                }
+              }}
+            />
+            <p className={css.promptHint}>{t('workspace.createFromPrompt.hint')}</p>
+            {promptError !== null && <div className={css.modalError} role="alert">{promptError}</div>}
+          </div>
+        </Modal>
       </div>
 
       {/* The collapsed rail keeps search as its own 36px control. */}

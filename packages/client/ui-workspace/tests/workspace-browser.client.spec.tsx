@@ -79,6 +79,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     insertWorkspaceBefore: vi.fn(async () => {}),
     insertSessionBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
+    createWorkspaceFromPrompt: vi.fn(async () => workspace('created', [])),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostDescription: selector => selector(undefined),
     renderSlot: ((_name: string, owner: { open: boolean }) => (owner.open ? <div data-testid="directory-flow" /> : null)) as never,
@@ -1240,5 +1241,30 @@ describe('WorkspaceBrowser', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索会话…'), { target: { value: 'needle' } })
     const row = screen.getByText('Needle A').closest('[role="treeitem"]') as HTMLElement
     expect(row.hasAttribute('draggable')).toBe(false)
+  })
+
+  it('creates a Workspace from a prompt and enters it', async () => {
+    const created = { ...workspace('created', []), path: '/workspaces/sales', title: 'sales' }
+    const createWorkspaceFromPrompt = vi.fn(async () => created)
+    const b = mount({ createWorkspaceFromPrompt })
+    fireEvent.click(screen.getByRole('button', { name: '按描述创建工作区' }))
+    const textarea = screen.getByPlaceholderText(/分析每日销售数据/)
+    fireEvent.change(textarea, { target: { value: '一个销售数据分析项目' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => {
+      expect(createWorkspaceFromPrompt).toHaveBeenCalledWith({ prompt: '一个销售数据分析项目' })
+      expect(b.props.startSession).toHaveBeenCalledWith(created.workspaceId)
+    })
+    expect(screen.queryByRole('dialog', { name: '按描述创建工作区' })).toBeNull()
+  })
+
+  it('surfaces a prompt-flow failure in the modal and keeps it open', async () => {
+    const createWorkspaceFromPrompt = vi.fn(async () => { throw new Error('boom') })
+    mount({ createWorkspaceFromPrompt })
+    fireEvent.click(screen.getByRole('button', { name: '按描述创建工作区' }))
+    fireEvent.change(screen.getByPlaceholderText(/分析每日销售数据/), { target: { value: 'x' } })
+    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+    await waitFor(() => { expect(screen.getByRole('alert').textContent).toBe('boom') })
+    expect(screen.getByRole('dialog', { name: '按描述创建工作区' })).toBeTruthy()
   })
 })

@@ -491,6 +491,55 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* Create-from-prompt modal: free-form description → Host-derived directory name. */
+.modalAction {
+  min-width: 72px;
+}
+
+.modalError {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.promptModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.promptTextarea {
+  width: 100%;
+  min-height: 104px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-input-bg, transparent);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  resize: vertical;
+  outline: none;
+}
+
+.promptTextarea:disabled {
+  opacity: 0.6;
+}
+
+.promptTextarea::placeholder {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.promptHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide {
     animation: none;

@@ -95,6 +95,7 @@ function mount(
       onPick={onPick}
       onClose={onClose}
       createWorkspace={createWorkspace}
+      createWorkspaceFromPrompt={createWorkspace}
       useDirectoryFlow={occupancy.useDirectoryFlow}
       renderSlot={renderSlot}
       t={t}
@@ -211,7 +212,7 @@ describe('WorkspacePicker', () => {
     render(
       <WorkspacePicker
         open useSessions={hook(sessions)} useWorkspaces={hook(workspaceState([workspace('alpha', 'Alpha')]))}
-        onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
+        onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()} createWorkspaceFromPrompt={vi.fn()}
         useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
       />,
     )
@@ -226,7 +227,7 @@ describe('WorkspacePicker', () => {
     render(
       <WorkspacePicker
         open anchorRef={anchor()} useSessions={hook(sessions)} useWorkspaces={hook(state)}
-        onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
+        onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()} createWorkspaceFromPrompt={vi.fn()}
         useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
       />,
     )

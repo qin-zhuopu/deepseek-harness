@@ -137,6 +137,12 @@ export type WorkspaceBrowserInjected = {
   insertSessionBefore: (workspaceId: WorkspaceId, sessionId: SessionId, beforeSessionId?: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /**
+   * Create a brand-new Workspace from a natural-language description. The Host
+   * derives a directory name with its default model, creates the directory
+   * under `/workspaces/<name>`, and adopts it.
+   */
+  createWorkspaceFromPrompt: (input: { prompt: string }) => Promise<WorkspaceView>
 }
 
 /** Full browser props: shell owner share + viewing store + injected actions + the locale seat. */
@@ -156,6 +162,11 @@ export type WorkspaceBrowserProps =
 export type WorkspacePickerInjected = DirectoryPickingInjected & {
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
+  /**
+   * Create a brand-new Workspace from a natural-language description (Host
+   * derives the name, creates it under `/workspaces/<name>`, and adopts it).
+   */
+  createWorkspaceFromPrompt: (input: { prompt: string }) => Promise<WorkspaceView>
 }
 
 /**

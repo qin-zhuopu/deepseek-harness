@@ -314,6 +314,26 @@ describe('WorkspaceRuntime', () => {
     await expect(rejected).rejects.toBeInstanceOf(WorkspaceCreateError)
   })
 
+  it('creates a Workspace from a prompt through the wire and preserves Host business errors', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    api.onWorkspaceCreateFromPrompt = () => Promise.resolve(ok({
+      workspace: { ...workspace('prompted'), path: '/workspaces/sales', title: 'sales' }, created: true,
+    }))
+    await expect(workspaces.createFromPrompt({ prompt: '一个销售数据分析项目' }))
+      .resolves.toMatchObject({ workspaceId: 'prompted' })
+    expect(workspaces.list.getSnapshot().items[0]).toMatchObject({ path: '/workspaces/sales', title: 'sales' })
+    expect(api.callsOf('workspace.createFromPrompt')).toEqual([{ prompt: '一个销售数据分析项目' }])
+    api.onWorkspaceCreateFromPrompt = () => Promise.resolve(err({
+      code: 'workspace-prompt-rejected', message: 'no name', details: { prompt: 'x' },
+    }))
+    const rejected = workspaces.createFromPrompt({ prompt: 'x' })
+    await expect(rejected).rejects.toThrow(/workspace-prompt-rejected: no name/)
+    await expect(rejected).rejects.toBeInstanceOf(WorkspaceCreateError)
+  })
+
   it('passes native directory selection and cancellation through without local state', async () => {
     const ctx = new Context()
     const api = new FakeApiClient()

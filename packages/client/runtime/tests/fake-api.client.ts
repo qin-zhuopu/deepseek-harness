@@ -190,6 +190,9 @@ export class FakeApiClient implements IApiClient {
   onWorkspaceCreate: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView; created: boolean }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws'), created: true }))
 
+  onWorkspaceCreateFromPrompt: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView; created: true }>> =
+    () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-prompt'), created: true }))
+
   onWorkspaceRename: (payload: unknown) => Promise<RpcResponse<{ workspace: WorkspaceView }>> =
     () => Promise.resolve(ok({ workspace: fakeWorkspace('fk-ws') }))
 
@@ -212,6 +215,8 @@ export class FakeApiClient implements IApiClient {
         : response
     )) as ReturnType<IApiClient['workspace']['list']>),
     create: (payload: unknown) => this.record('workspace.create', payload, this.onWorkspaceCreate(payload)),
+    createFromPrompt: (payload: unknown) =>
+      this.record('workspace.createFromPrompt', payload, this.onWorkspaceCreateFromPrompt(payload)),
     rename: (payload: unknown) => this.record('workspace.rename', payload, this.onWorkspaceRename(payload)),
     delete: (payload: unknown) => this.record('workspace.delete', payload, this.onWorkspaceDelete(payload)),
     insertBefore: (payload: unknown) =>

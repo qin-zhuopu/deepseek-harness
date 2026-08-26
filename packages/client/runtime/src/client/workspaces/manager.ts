@@ -136,6 +136,20 @@ export class WorkspaceManager {
   }
 
   /**
+   * Create a brand-new Workspace from a natural-language description (the Host
+   * derives the directory name, mints the directory under the fixed root, and
+   * adopts it), then publish its returned snapshot without waiting for the
+   * changed frame.
+   * @param input - the operator's description.
+   * @returns the wire result.
+   */
+  async createFromPrompt(input: { prompt: string }): Promise<RpcResult<{ workspace: WorkspaceView; created: true }>> {
+    const { result } = await this.api.workspace.createFromPrompt({ prompt: input.prompt })
+    if (result.ok) this.upsert(result.value.workspace)
+    return result
+  }
+
+  /**
    * Rename a Workspace, then publish its returned snapshot without waiting
    * for the changed frame.
    * @param workspaceId - target workspace.

@@ -2679,6 +2679,26 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         emitHost({ type: 'host/workspace-changed', workspace: { ...created } })
         return ok(request, { workspace: { ...created }, created: true })
       },
+      createFromPrompt: (request) => {
+        // Fixture answer to the prompt flow: derive a slug like the real
+        // Host does and mint the workspace (no model, no mkdir here).
+        const slug = request.payload.prompt.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-') || 'workspace'
+        const path = `/workspaces/${slug}`
+        const existing = workspaces.find(w => w.path === path)
+        if (existing !== undefined) return ok(request, { workspace: { ...existing }, created: true as const })
+        const now = new Date().toISOString()
+        const created: WorkspaceView = {
+          workspaceId: wid(`fx-ws-${nextWorkspace++}`),
+          path,
+          title: slug,
+          sessionIds: [],
+          createdAt: now,
+          updatedAt: now,
+        }
+        workspaces.unshift(created)
+        emitHost({ type: 'host/workspace-changed', workspace: { ...created } })
+        return ok(request, { workspace: { ...created }, created: true as const })
+      },
       rename: (request) => {
         const { workspaceId, title } = request.payload
         const workspace = workspaces.find(w => w.workspaceId === workspaceId)
@@ -3198,6 +3218,7 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'host.openPath': return this.api.host.openPath(request, new AbortController().signal)
       case 'workspace.list': return this.api.workspace.list(request)
       case 'workspace.create': return this.api.workspace.create(request)
+      case 'workspace.createFromPrompt': return this.api.workspace.createFromPrompt(request)
       case 'workspace.rename': return this.api.workspace.rename(request)
       case 'workspace.delete': return this.api.workspace.delete(request)
       case 'workspace.insertBefore': return this.api.workspace.insertBefore(request)

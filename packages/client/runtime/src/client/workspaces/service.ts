@@ -203,6 +203,19 @@ export class WorkspaceRuntime implements IWorkspaces {
   }
 
   /**
+   * Create a brand-new Workspace from a natural-language description: the Host
+   * derives a directory name with its default model, creates the directory
+   * under `/workspaces/<name>`, and adopts it.
+   * @param input - the operator's description of the desired workspace.
+   * @returns the created Workspace.
+   */
+  async createFromPrompt(input: { prompt: string }): Promise<WorkspaceView> {
+    const result = await this.manager.createFromPrompt(input)
+    if (!result.ok) throw new WorkspaceCreateError(result.error)
+    return result.value.workspace
+  }
+
+  /**
    * Open the Host's native directory picker (the `native` capability).
    * @returns the selected path, or null when the user cancelled.
    */

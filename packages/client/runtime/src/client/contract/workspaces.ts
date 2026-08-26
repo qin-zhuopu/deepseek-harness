@@ -35,6 +35,14 @@ export interface IWorkspaces {
    */
   create(input: { path: string }): Promise<WorkspaceView>
   /**
+   * Create a brand-new Workspace from a natural-language description. The Host
+   * derives a directory name with its default model, creates the directory
+   * under the fixed root `/workspaces/<name>`, and adopts it.
+   * @param input - the operator's description of the desired workspace.
+   * @returns the created Workspace.
+   */
+  createFromPrompt(input: { prompt: string }): Promise<WorkspaceView>
+  /**
    * Open the Host's native directory picker.
    * @returns the selected path, or null when the user cancelled.
    */

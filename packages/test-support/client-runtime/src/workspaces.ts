@@ -89,6 +89,26 @@ export class TestWorkspaces implements IWorkspaces {
   }
 
   /**
+   * Create a Workspace from a prompt (recorded). The default echoes a view
+   * under `/workspaces/<slug>`; stub for shaped flows.
+   * @param input - the operator's description.
+   * @returns the created Workspace view.
+   */
+  async createFromPrompt(input: { prompt: string }): Promise<WorkspaceView> {
+    this.calls.push({ method: 'createFromPrompt', args: [input] })
+    const stub = this.stubs.get('createFromPrompt')
+    if (stub !== undefined) return await (stub(input) as Promise<WorkspaceView>)
+    const slug = input.prompt.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-') || 'workspace'
+    const path = `/workspaces/${slug}`
+    return {
+      workspaceId: `ws-prompt-${slug}` as WorkspaceId,
+      title: slug,
+      path,
+      sessionIds: [],
+    } as unknown as WorkspaceView
+  }
+
+  /**
    * Open a path with the host OS default application (recorded; default no-op).
    * @param path - host-resolvable path.
    */

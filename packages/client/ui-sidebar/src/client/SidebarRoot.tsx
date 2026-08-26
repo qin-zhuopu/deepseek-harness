@@ -195,16 +195,6 @@ export function SidebarRoot({
           expandSidebar: () => { if (collapsed) toggleSidebar() },
         })}
       </div>
-
-      {/* Footer actions stack above Settings in both sidebar widths. */}
-      <div className={css.footArea}>
-        <div className={css.footerActions}>
-          {renderSlot('sidebar.footer.action', { wide })}
-        </div>
-        <div className={css.settingsArea}>
-          {renderSlot('sidebar.settings', { wide })}
-        </div>
-      </div>
     </div>
   )
 }

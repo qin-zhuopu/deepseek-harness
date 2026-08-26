@@ -10,6 +10,10 @@ describe('isLoopbackHostname', () => {
     }
   })
 
+  it('accepts trusted company deployment hosts', () => {
+    expect(isLoopbackHostname('dsh.gb10.zhuopu.net')).toBe(true)
+  })
+
   it('refuses malformed and non-loopback hostnames', () => {
     for (const hostname of ['remote.localhost', '::1', '128.0.0.1', '127.0.0', '127.0.0.256', '127.0.0.-1']) {
       expect(isLoopbackHostname(hostname)).toBe(false)

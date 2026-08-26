@@ -1,7 +1,7 @@
 /** Preview-column body: fills the right-edge layout column with a noVNC iframe. */
 
 import { useRef } from 'react'
-import { IconCloseOutline16, IconFullscreenOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCloseOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ILayout } from '@deepseek-ai/dsh-client-ui-layout/client'
 import css from './PreviewPanel.module.css'
@@ -15,8 +15,8 @@ export type PreviewPanelProps =
  * (this component fills whatever width the concession solve grants), so it
  * renders nothing while the column is closed — the subtree stays mounted at
  * zero width like details. It embeds the noVNC page in an iframe and offers
- * close / open-in-new-tab / reload controls; close routes through ctx.layout
- * so the sidebar toggle's highlight stays in sync.
+ * reload / close controls; close routes through ctx.layout so the sidebar
+ * toggle's highlight stays in sync.
  * @param props - owner column state, the noVNC URL, and the layout face.
  * @returns the column body while open, otherwise nothing.
  */
@@ -41,17 +41,6 @@ export function PreviewPanel({ open, url, layout }: PreviewPanelProps): React.JS
             <button type="button" className={css.action} aria-label="刷新" onClick={reload}>
               <span className={css.reloadGlyph} aria-hidden="true">⟳</span>
             </button>
-          </Tooltip>
-          <Tooltip label="在新标签页打开" side="bottom" delayMs={500}>
-            <a
-              className={css.action}
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="在新标签页打开"
-            >
-              <IconFullscreenOutline16 size={16} />
-            </a>
           </Tooltip>
           <Tooltip label="关闭" side="bottom" delayMs={500}>
             <button

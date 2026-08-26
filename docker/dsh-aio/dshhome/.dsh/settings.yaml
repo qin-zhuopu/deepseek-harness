@@ -1,17 +1,13 @@
-ui-onboarding:
-  welcomeNoticeVersion: 2026-08-13.1
 llm-pi-ai:
   providers:
     nr:
       displayName: nr
       apiKeyEnv: NR_API_KEY
       api: openai-completions
-      baseURL: http://localhost:20128/v1
+      baseURL: https://litellm.jereh.cn
       models:
-        - id: kr/claude-opus-4.8
-          name: kr/claude-opus-4.8
-        - id: kr/claude-haiku-4.5
-          name: kr/claude-haiku-4.5
+        - id: Jereh-DeepSeek-V4-Flash-0731
+          name: Jereh-DeepSeek-V4-Flash-0731
 agent-default-model:
   provider: nr
-  model: kr/claude-opus-4.8
+  model: Jereh-DeepSeek-V4-Flash-0731

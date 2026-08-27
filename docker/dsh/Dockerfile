@@ -28,15 +28,10 @@ RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
 # ── app ──
 WORKDIR /app
 
-# 依赖层：只认 pnpm-lock.yaml。`pnpm fetch` 按 lockfile 把包灌进虚拟 store，
-# 只要 lockfile 不变，改任何源码都不会让这一层失效——省掉最耗时的联网下载。
-COPY pnpm-lock.yaml ./
-RUN pnpm fetch
-
-# 源码层：改源码只会从上面已 fetch 的 store 里离线安装（不再联网），
-# `pnpm fetch` 那层的缓存照旧命中。
 COPY . .
-RUN pnpm install --frozen-lockfile --offline
+
+# Install (immutable)
+RUN pnpm install --frozen-lockfile
 
 # .git now ships in the image (see .dockerignore) so the dev container can
 # git pull/diff. The build still takes the commit as an explicit arg rather

@@ -1674,11 +1674,11 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   }
 
   /** Resolve or create one path while holding the Host's workspace-create chain. */
-  function ensureWorkspace(path: string): Promise<{ workspace: Workspace; created: boolean }> {
+  function ensureWorkspace(path: string, title?: string): Promise<{ workspace: Workspace; created: boolean }> {
     const operation = workspaceCreationChain.then(async () => {
       const existing = await ctx.workspaceRegistry.resolveByPath(path)
       if (existing !== undefined) return { workspace: existing, created: false }
-      return { workspace: await ctx.workspaceRegistry.create(path), created: true }
+      return { workspace: await ctx.workspaceRegistry.create(path, title), created: true }
     })
     workspaceCreationChain = operation.then(() => undefined, () => undefined)
     return operation
@@ -1688,7 +1688,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
   const WORKSPACE_PROMPT_ROOT = defaults.workspaceRoot ?? '/workspaces'
 
   /** The workspace minted when the root starts empty, so the sidebar is never blank. */
-  const WORKSPACE_ROOT_SEED_NAME = 'daily'
+  const WORKSPACE_ROOT_SEED_NAME = 'system-admin'
+  /** Display title for the seed workspace; the directory stays ASCII while the sidebar reads Chinese. */
+  const WORKSPACE_ROOT_SEED_TITLE = '系统管理'
 
   /**
    * Mirror the fixed root's direct child directories into the registry: adopt
@@ -1720,7 +1722,9 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
       diskPaths.add(canonicalChild)
       if (await ctx.workspaceRegistry.resolveByPath(canonicalChild) === undefined) {
         try {
-          await ensureWorkspace(canonicalChild)
+          // The seed directory carries a fixed Chinese display title; every
+          // other directory falls back to its basename.
+          await ensureWorkspace(canonicalChild, entry === WORKSPACE_ROOT_SEED_NAME ? WORKSPACE_ROOT_SEED_TITLE : undefined)
         } catch (error) {
           ctx.logger.warn(`could not adopt workspace directory '${canonicalChild}': ${errorChain(error)}`)
         }

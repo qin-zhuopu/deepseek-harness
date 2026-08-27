@@ -9,9 +9,10 @@
 node_modules
 **/node_modules
 
-# The image never runs git; the source commit arrives as DSH_CLIENT_COMMIT_HASH
-# (client-build-environment.ts reads it instead of calling `git rev-parse`).
-.git
+# .git is intentionally kept in the build context: the dev image ships
+# /app/.git so a developer can `git pull` / `git diff` inside the running dev
+# container (dsh-dev.gb10). client-build-environment.ts still prefers the
+# DSH_CLIENT_COMMIT_HASH build-arg, so carrying .git does not change build output.
 
 # Build outputs are produced inside the image by `pnpm run build`.
 **/lib

@@ -28,12 +28,17 @@ RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
 # ── app ──
 WORKDIR /app
 
+# CI=true makes scripts/install-lefthook.mjs a no-op for the whole build. With
+# .git now in the context the hook installer would fail on /app/.git/dsh-hooks;
+# git hooks are a developer-local concern the image never needs. Set as ENV (not
+# a per-RUN prefix) because `pnpm run build` re-triggers install via its deps
+# check, which must also see CI=true.
+ENV CI=true
+
 COPY . .
 
-# Install (immutable). CI=true makes scripts/install-lefthook.mjs no-op: git
-# hooks are a developer-local concern, and with .git now in the context the
-# hook installer would otherwise fail on /app/.git/dsh-hooks during build.
-RUN CI=true pnpm install --frozen-lockfile
+# Install (immutable)
+RUN pnpm install --frozen-lockfile
 
 # .git now ships in the image (see .dockerignore) so the dev container can
 # git pull/diff. The build still takes the commit as an explicit arg rather

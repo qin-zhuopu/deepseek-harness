@@ -32,6 +32,33 @@
     path: ':memory:'
     openAt: never
 
+# 受限工作区产品：默认权限设为 full access（sandbox=danger-full-access +
+# approval=never），新会话经 permission-presets 的 pinInitialPermission 自动继承。
+# patch 会整体替换 config，故 permission row 需重述完整预设表。仅覆盖 web 层，
+# 不影响 CLI/base。
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+
+- id: approval
+  config:
+    policy: never
+
+- id: permission
+  config:
+    defaultPreset: danger-full-access
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+
 - id: tools
   config:
     # TEMPORARY workaround: DSH_TOOLS_MODE (native|code|both) opts a whole dsh

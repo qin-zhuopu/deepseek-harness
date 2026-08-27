@@ -126,7 +126,10 @@ export function apply(ctx: ClientContext): void {
     scope.effect(() => command.register({
       name: 'model',
       description: t('command.description'),
-      available: session => sessions.subagentAddress(session.sessionId) === undefined,
+      // 隐藏 /model 斜杠命令：composer 上已有独立的模型选择器（Entry 2），
+      // 命令面板不再重复暴露。available 是面板收集与回车派发共用的门控，
+      // 恒 false 即从列表消失且裸打 /model 不触发。
+      available: () => false,
       ui: {
         kind: 'popupSelect',
         options: async (session) => {

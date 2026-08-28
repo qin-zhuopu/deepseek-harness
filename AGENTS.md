@@ -82,7 +82,7 @@ pnpm run demo:acp       # ACP automation server (needs DEEPSEEK_API_KEY)
 
 ## Container image maintenance
 
-Dockerfiles at `docker/**` (e.g. `docker/dsh-aio/Dockerfile`, `docker/dsh/Dockerfile`, `docker/chrome-base/Dockerfile`, and the `.internal`/`.prod`/`.layered` variants) are the source of truth for the images this environment runs on. Fold every live-container adjustment back into the relevant Dockerfile(s) so a rebuild reproduces it — cover all of them that share the image, not just the one observed at runtime. Append packages to the existing `RUN apt-get` layer rather than adding a layer, so build cache is reused. Only refactor a Dockerfile when the user explicitly asks to optimize it.
+Dockerfiles at `docker/**` (e.g. `docker/dsh-aio/Dockerfile`, `docker/dsh/Dockerfile`, `docker/chrome-base/Dockerfile`, and the `.internal`/`.prod`/`.layered` variants) are the source of truth for the images this environment runs on. Fold every live-container adjustment back into the relevant Dockerfile(s) so a rebuild reproduces it — cover all of them that share the image, not just the one observed at runtime. Append packages to the existing `RUN apt-get` layer rather than adding a layer, so build cache is reused. Only refactor a Dockerfile when the user explicitly asks to optimize it. Journal each ops session (live-container fixes, restart procedures, API recipes, pitfalls) in the session workspace at `docs/ops/<YYYY-MM-DD>-<english-topic>.md`; repo-level knowledge still belongs in [docs/containerization](docs/containerization/).
 
 ### Host sandbox failures
 

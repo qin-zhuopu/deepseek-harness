@@ -80,6 +80,10 @@ pnpm run demo:cordis    # the agent modifies its own runtime (needs key)
 pnpm run demo:acp       # ACP automation server (needs DEEPSEEK_API_KEY)
 ```
 
+## Container image maintenance
+
+Dockerfiles at `docker/**` (e.g. `docker/dsh-aio/Dockerfile`, `docker/dsh/Dockerfile`, `docker/chrome-base/Dockerfile`, and the `.internal`/`.prod`/`.layered` variants) are the source of truth for the images this environment runs on. Fold every live-container adjustment back into the relevant Dockerfile(s) so a rebuild reproduces it — cover all of them that share the image, not just the one observed at runtime. Append packages to the existing `RUN apt-get` layer rather than adding a layer, so build cache is reused. Only refactor a Dockerfile when the user explicitly asks to optimize it.
+
 ### Host sandbox failures
 
 When required `gh`, `pnpm`, build, test, or generator commands fail because the agent sandbox blocks credentials, network, IPC, file watching, or nested `sandbox-exec`, retry unchanged with the narrowest host escalation before diagnosing authentication or project failure. Require sandbox evidence; never bypass genuine test failures or the product sandbox under test.

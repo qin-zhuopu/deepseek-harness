@@ -51,6 +51,7 @@ RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
+      fonts-noto-cjk fonts-noto-cjk-extra \
  && rm -rf /var/lib/apt/lists/*
 
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).

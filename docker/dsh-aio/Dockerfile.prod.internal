@@ -49,6 +49,24 @@ RUN sed -i 's|http://mirrors.aliyun.com/ubuntu/|http://10.1.7.49:8081/repository
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
 
+# 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。
+# 依赖上面 apt 层提供的 curl；按 dpkg 架构自动选择 amd64/arm64 发布包。
+# JCLI_DOWNLOAD_BASE 默认指向公网 GitHub Release；气隙主机须像重定向 apt/npm 一样，
+# 传入内网镜像 URL 才能取到 jcli 发布包。
+# 凭据不写入镜像：运行时由用户在 ~/.jenkins-cli.yaml 提供（由 /root 具名卷持久化）。
+ARG JCLI_DOWNLOAD_BASE=https://github.com/jenkins-zh/jenkins-cli/releases/latest/download
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) jcli_arch=amd64 ;; \
+      arm64) jcli_arch=arm64 ;; \
+      *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fL "${JCLI_DOWNLOAD_BASE}/jcli-linux-${jcli_arch}.tar.gz" -o /tmp/jcli.tar.gz; \
+    tar -xzf /tmp/jcli.tar.gz -C /tmp jcli; \
+    install -m 0755 /tmp/jcli /usr/local/bin/jcli; \
+    rm -f /tmp/jcli.tar.gz /tmp/jcli
+
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
 COPY fit-resize.js /usr/share/novnc/fit-resize.js

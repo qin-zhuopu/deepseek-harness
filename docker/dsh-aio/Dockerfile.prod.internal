@@ -63,9 +63,12 @@ RUN set -eux; \
       *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
     esac; \
     curl -fL "${JCLI_DOWNLOAD_BASE}/jcli-linux-${jcli_arch}.tar.gz" -o /tmp/jcli.tar.gz; \
-    tar -xzf /tmp/jcli.tar.gz -C /tmp jcli; \
-    install -m 0755 /tmp/jcli /usr/local/bin/jcli; \
-    rm -f /tmp/jcli.tar.gz /tmp/jcli
+    mkdir -p /tmp/jcli-extract; \
+    tar -xzf /tmp/jcli.tar.gz -C /tmp/jcli-extract; \
+    jcli_bin="$(find /tmp/jcli-extract -type f -name jcli | head -n1)"; \
+    test -n "$jcli_bin"; \
+    install -m 0755 "$jcli_bin" /usr/local/bin/jcli; \
+    rm -rf /tmp/jcli.tar.gz /tmp/jcli-extract
 
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py

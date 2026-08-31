@@ -25,6 +25,11 @@
 ARG DSH_IMAGE=dsh:dev
 ARG CHROME_BASE_IMAGE=harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
 ARG NODE_IMAGE=node:24
+# JCLI_DOWNLOAD_BASE  jcli（jenkins-zh/jenkins-cli）发布包的下载基址，可重定向到内网镜像。
+#                     默认指向公网 GitHub Release 的 latest/download，无需固定版本；
+#                     受限网络的构建者传入内网镜像 URL（与 DSH_IMAGE/CHROME_BASE_IMAGE/
+#                     NODE_IMAGE 以及 nexus.jereh.cn 的重定向理念一致）。
+ARG JCLI_DOWNLOAD_BASE=https://github.com/jenkins-zh/jenkins-cli/releases/latest/download
 
 # ---- Stage 1: reuse the already-built dsh app ----
 FROM ${DSH_IMAGE} AS dshbuild
@@ -53,6 +58,25 @@ RUN apt-get update \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
       fonts-noto-cjk fonts-noto-cjk-extra \
  && rm -rf /var/lib/apt/lists/*
+
+# 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。
+# 依赖上面 apt 层提供的 curl；按 dpkg 架构自动选择 amd64/arm64 发布包。
+# 凭据不写入镜像：运行时由用户在 ~/.jenkins-cli.yaml 提供（由 /root 具名卷持久化）。
+ARG JCLI_DOWNLOAD_BASE
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in \
+      amd64) jcli_arch=amd64 ;; \
+      arm64) jcli_arch=arm64 ;; \
+      *) echo "unsupported architecture: $arch" >&2; exit 1 ;; \
+    esac; \
+    curl -fL "${JCLI_DOWNLOAD_BASE}/jcli-linux-${jcli_arch}.tar.gz" -o /tmp/jcli.tar.gz; \
+    mkdir -p /tmp/jcli-extract; \
+    tar -xzf /tmp/jcli.tar.gz -C /tmp/jcli-extract; \
+    jcli_bin="$(find /tmp/jcli-extract -type f -name jcli | head -n1)"; \
+    test -n "$jcli_bin"; \
+    install -m 0755 "$jcli_bin" /usr/local/bin/jcli; \
+    rm -rf /tmp/jcli.tar.gz /tmp/jcli-extract
 
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py

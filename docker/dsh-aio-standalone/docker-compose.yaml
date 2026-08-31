@@ -1,0 +1,57 @@
+# dsh-aio 单机独立编排：最简持久化方案。一个 all-in-one 容器里跑
+# dsh web(3080) + Chrome(CDP 9222) + Xvnc + noVNC(6080) + chrome-devtools MCP，
+# 把整个 /root 挂成一个命名卷，目标是镜像升级重建时不丢用户数据。
+#
+# 与 docker/nginx-proxy/ 不同：这里不走 nginx 反代、不做 bridge 网络聚合，
+# 直接用 host 网络暴露容器内 loopback 端口，适合单机直连访问的场景。
+#
+# 访问入口：
+#   dsh Web UI  -> http://127.0.0.1:3080/
+#   Chrome 画面 -> http://127.0.0.1:6080/vnc.html
+# 让 agent「用 chrome 工具打开百度」即可在 noVNC 页里实时看到浏览器动作。
+#
+# 用法（在本目录）：
+#   cp .env.example .env && vi .env   # 填 DSH_IMAGE / NR_API_KEY，chmod 600
+#   docker compose config             # 校验
+#   docker compose up -d              # 启动
+#
+# NR_API_KEY 等放 .env（chmod 600），compose 自动读取。
+
+services:
+  dsh-aio:
+    image: ${DSH_IMAGE:?请在 .env 里指定 DSH_IMAGE}
+    container_name: dsh-aio
+    # network_mode: host 是必须的：dsh web 出于 RCE 安全只绑 127.0.0.1、
+    # 拒绝绑 0.0.0.0，所以 -p 端口映射对它无效（映射的是宿主机网卡地址，
+    # 打不到只监听 loopback 的进程）。同时 baked 进镜像的 MCP 客户端要走
+    # 共享的宿主机 loopback 去连 Chrome(127.0.0.1:9222)。这点与
+    # docker/dsh-aio/Dockerfile 顶部注释一致。
+    network_mode: host
+    shm_size: 1g
+    restart: unless-stopped
+    environment:
+      - NR_API_KEY=${NR_API_KEY:-}
+      - SCREEN_GEOMETRY=${SCREEN_GEOMETRY:-576x1440x24}
+    volumes:
+      # 整个 root home 一卷保存：.dsh(用户数据) + workspace(代码) +
+      # .gitconfig / .ssh / .npmrc / 各种缓存 全部持久化。
+      #
+      # 【必须用命名卷 dsh-root:/root，不要换成宿主机目录（如 /srv/xxx:/root）】
+      # 原因是两者的挂载语义不同：命名卷首次挂到镜像里「本来就有内容」的
+      # /root 时，如果卷是空的，Docker 会把镜像内 /root 的现有内容
+      # （含 .dsh/settings.yaml、.dsh/profiles 等出厂配置）自动「播种」进卷；
+      # 而宿主机目录挂载没有这个播种行为——一个空的宿主机目录会直接盖住
+      # /root，导致 settings.yaml / profiles 全部消失、dsh 因缺配置启动失败。
+      #
+      # 【升级镜像的已知代价】命名卷的「自动播种」只在卷为空时发生一次。
+      # 一旦升级镜像（docker build 出新版）后再启动，卷里已经存着首次那版
+      # 的 .dsh/settings.yaml / profiles，新镜像里对这两项的更新不会自动
+      # 覆盖进来——它们会一直停留在首次启动时的版本。若新版本改了默认
+      # settings.yaml 或 profiles 的结构/字段，需要手动同步一次：进容器把
+      # 旧的 settings.yaml / profiles 删掉让 dsh 自愈重建，或手动 merge 差异。
+      # 而 sessions / attachments / skills / credentials 等纯用户数据不受
+      # 影响，任何升级都会原样保留。
+      - dsh-root:/root
+
+volumes:
+  dsh-root:

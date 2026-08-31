@@ -33,8 +33,19 @@ import { PreviewPanel } from './PreviewPanel.tsx'
  */
 const DEFAULT_VNC_URL = 'http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale'
 
-/** Default files-browser page: a small local file browser server. */
-const DEFAULT_FILES_URL = 'http://127.0.0.1:6099/'
+/**
+ * Resolve the file-browser page URL. It lives behind the front proxy at the
+ * same-origin /files/ path (so a reverse proxy like dsh-dev.gb10.zhuopu.net
+ * reaches it). On a raw localhost:3080 there is no /files route on dsh web
+ * itself, so we point at the same host's front-proxy port (8080) instead — an
+ * absolute 127.0.0.1 hardcode would resolve to the visitor's own machine.
+ */
+function resolveFilesUrl(): string {
+  if (typeof window === 'undefined') return '/files/'
+  if (window.location.port === '3080') return `http://${window.location.hostname}:8080/files/`
+  return '/files/'
+}
+const DEFAULT_FILES_URL = resolveFilesUrl()
 
 /** Read the boot-time URL override, falling back to the local default. */
 function resolveVncUrl(): string {

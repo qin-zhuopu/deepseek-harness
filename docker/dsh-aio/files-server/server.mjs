@@ -12,7 +12,10 @@ import { createServer } from 'node:http'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 
-const ROOT = process.env.FILES_SERVER_ROOT || '/root/workspace'
+const ROOT = process.env.FILES_SERVER_ROOT || '/'
+// Directory shown on first open (must be under ROOT/==/ so the visitor can
+// still browse the whole tree from there).
+const START = process.env.FILES_SERVER_START || '/root'
 const PORT = Number(process.env.FILES_SERVER_PORT || 6099)
 const HOST = process.env.FILES_SERVER_HOST || '127.0.0.1'
 
@@ -53,6 +56,7 @@ li a:hover{color:#7aa2ff}
 <ul id="list"></ul>
 <script>
 const ROOT = ${JSON.stringify(ROOT)}
+const START = ${JSON.stringify(START)}
 let current = '/'
 function encodePath(p){ return encodeURIComponent(p) }
 async function load(dir){
@@ -76,7 +80,7 @@ async function load(dir){
   if(!data.children.length) ul.innerHTML='<li class="empty">（空目录）</li>'
 }
 document.getElementById('up').addEventListener('click',async()=>{ const res=await fetch('api?path='+encodePath(current)); const d=await res.json(); if(d.parent) load(d.parent) })
-load(ROOT)
+load(START)
 </script>
 </body>
 </html>`
@@ -84,6 +88,7 @@ load(ROOT)
 /** Normalize an absolute path under ROOT, rejecting traversal. */
 function underRoot(p) {
   const abs = resolve(p)
+  if (ROOT === sep) return abs
   if (abs !== ROOT && !abs.startsWith(ROOT + sep)) return null
   return abs
 }
@@ -103,7 +108,6 @@ const server = createServer((req, res) => {
       let st; try { st = statSync(abs) } catch { res.writeHead(404).end('not found'); return }
       if (!st.isDirectory()) { res.writeHead(400).end('not a directory'); return }
       const children = readdirSync(abs, { withFileTypes: true })
-        .filter(e => !e.name.startsWith('.'))
         .map(e => {
           const p = join(abs, e.name)
           let dir = e.isDirectory()

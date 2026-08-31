@@ -49,6 +49,13 @@ set -e
 : "${TRUSTED_HOSTS:=}"
 export SIDECAR_BIND SIDECAR_PORT VNC_PORT
 export FRONT_PORT FRONT_BIND VNC_PREFIX DSH_PORT NOVNC_PORT
+# The GUI's "文件" file browser (ui-vnc-preview /files tab) is served same-origin
+# through front-proxy.at /files and backed by files-server. Root it where the
+# operator can see real files; INIT_WORKSPACE (or the deploy's workspace) is a
+# sensible default.
+: "${FILES_SERVER_ROOT:=${INIT_WORKSPACE:-/root/workspace}}"
+: "${FILES_SERVER_PORT:=6099}"
+export FILES_SERVER_ROOT FILES_SERVER_PORT
 export DISPLAY=":${DISPLAY_NUM}"
 export PATH=/opt/node/bin:$PATH
 export DSH_HOME=/root/.dsh
@@ -122,6 +129,11 @@ fi
 if [ -n "${FRONT_PORT}" ]; then
   node /usr/local/bin/front-proxy.js &
 fi
+
+# files-server backs the GUI's "文件" tab: a read-only web file browser on
+# loopback. front-proxy routes /files here; on a raw localhost:3080 the GUI
+# points at http://<host>:8080/files/ which also reaches it through front-proxy.
+node /usr/local/bin/files-server/server.mjs &
 
 log "Google Chrome (CDP ${BIND_ADDR}:${CDP_PORT}, window ${SCREEN_W}x${SCREEN_H})"
 google-chrome \

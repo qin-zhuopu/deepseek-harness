@@ -54,6 +54,8 @@ COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py
 COPY fit-resize.js /usr/share/novnc/fit-resize.js
 COPY patch-vnc-html.py /usr/local/bin/patch-vnc-html.py
 COPY front-proxy.js /usr/local/bin/front-proxy.js
+# Read-only web file browser backing the GUI's "文件" tab (/files via front-proxy).
+COPY files-server /usr/local/bin/files-server
 RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
  && python3 /usr/local/bin/patch-vnc-html.py /usr/share/novnc/vnc.html
 

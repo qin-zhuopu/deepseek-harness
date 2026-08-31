@@ -29,6 +29,7 @@ const FRONT_BIND = process.env.FRONT_BIND || '0.0.0.0'
 const WEB_PORT = Number(process.env.DSH_PORT || 3080)
 const NOVNC_PORT = Number(process.env.NOVNC_PORT || 6080)
 const SIDECAR_PORT = Number(process.env.SIDECAR_PORT || 6081)
+const FILES_PORT = Number(process.env.FILES_PORT || 6099)
 const VNC_PREFIX = process.env.VNC_PREFIX || '/vnc'
 const UPSTREAM = '127.0.0.1'
 
@@ -51,6 +52,14 @@ function route(url) {
   // every caller pass ?path=vnc/websockify.
   if (url === '/websockify' || url.startsWith('/websockify?')) {
     return { port: NOVNC_PORT, path: url }
+  }
+  // The GUI's "文件" file browser is served same-origin at /files and proxied
+  // here to the local file-server. Strip the /files mount prefix (the
+  // file-server answers /, /api and /raw at its own root) so the page's
+  // relative api/raw requests resolve under this origin through the same port.
+  if (url === '/files' || url.startsWith('/files/')) {
+    const path = url === '/files' || url === '/files/' ? '/' : url.slice('/files'.length)
+    return { port: FILES_PORT, path }
   }
   return { port: WEB_PORT, path: url }
 }
@@ -109,5 +118,5 @@ server.on('upgrade', (req, socket, head) => {
 
 server.listen(FRONT_PORT, FRONT_BIND, () => {
   console.log(`[front-proxy] ${FRONT_BIND}:${FRONT_PORT}`
-    + ` -> web:${WEB_PORT} ${VNC_PREFIX}:${NOVNC_PORT} /resize:${SIDECAR_PORT}`)
+    + ` -> web:${WEB_PORT} ${VNC_PREFIX}:${NOVNC_PORT} /resize:${SIDECAR_PORT} /files:${FILES_PORT}`)
 })

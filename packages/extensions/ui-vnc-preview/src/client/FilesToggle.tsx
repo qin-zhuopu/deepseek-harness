@@ -1,40 +1,40 @@
-/** Right-rail icon button that toggles the browser preview tab. */
+/** Right-rail icon button that toggles the files browser tab. */
 
 import { useSyncExternalStore } from 'react'
-import { IconGlobeOutline14, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconFolderOpenOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ILayout } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { setPreviewTab, subscribePreviewTab, getPreviewTab } from './preview-store.ts'
 import css from './PreviewToggle.module.css'
 
 /** Props composed by the rail.right.action slot plus the injected layout face. */
-export type PreviewToggleProps =
+export type FilesToggleProps =
   PropsRuntime<'rail.right.action'> & { layout: ILayout }
 
 /**
- * The right-rail browser toggle: opens the preview column and switches to the
- * browser tab. Highlighted when the browser tab is active.
+ * The right-rail files toggle: opens the preview column and switches to the
+ * files tab. Highlighted when the files tab is active.
  */
-export function PreviewToggle({ layout }: PreviewToggleProps): React.JSX.Element {
+export function FilesToggle({ layout }: FilesToggleProps): React.JSX.Element {
   const active = useSyncExternalStore(
     subscribePreviewTab,
-    () => getPreviewTab() === 'browser',
+    () => getPreviewTab() === 'files',
   )
   const open = useSyncExternalStore(
     fn => layout.subscribe(fn),
     () => layout.isPreviewOpen(),
   )
   return (
-    <Tooltip label="浏览器" side="bottom" delayMs={500}>
+    <Tooltip label="文件" side="bottom" delayMs={500}>
       <button
         type="button"
         className={css.railButton}
         data-active={active || undefined}
-        aria-label="浏览器"
+        aria-label="文件"
         aria-expanded={open}
-        onClick={() => { setPreviewTab('browser'); layout.openPreview() }}
+        onClick={() => { setPreviewTab('files'); layout.openPreview() }}
       >
-        <IconGlobeOutline14 size={18} />
+        <IconFolderOpenOutline16 size={18} />
       </button>
     </Tooltip>
   )

@@ -21,6 +21,7 @@ import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 // augments ctx.layout.
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { PreviewToggle } from './PreviewToggle.tsx'
+import { FilesToggle } from './FilesToggle.tsx'
 import { PreviewPanel } from './PreviewPanel.tsx'
 
 /**
@@ -31,6 +32,9 @@ import { PreviewPanel } from './PreviewPanel.tsx'
  * fills the preview column without letterboxing.
  */
 const DEFAULT_VNC_URL = 'http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale'
+
+/** Default files-browser page: a small local file browser server. */
+const DEFAULT_FILES_URL = 'http://127.0.0.1:6099/'
 
 /** Read the boot-time URL override, falling back to the local default. */
 function resolveVncUrl(): string {
@@ -49,6 +53,7 @@ export const inject = ['slots', 'layout']
  */
 export function apply(ctx: ClientContext): void {
   const url = resolveVncUrl()
+  const filesUrl = DEFAULT_FILES_URL
   const layout = ctx.layout
 
   ctx.slots.inject('rail.right.action', () => ctx.slots.register({
@@ -58,8 +63,15 @@ export function apply(ctx: ClientContext): void {
     inject: () => ({ layout }),
   }, PreviewToggle))
 
+  ctx.slots.inject('rail.right.action', () => ctx.slots.register({
+    name: 'rail.right.action',
+    id: 'files-preview',
+    order: 51,
+    inject: () => ({ layout }),
+  }, FilesToggle))
+
   ctx.slots.inject('preview', () => ctx.slots.register({
     name: 'preview',
-    inject: () => ({ url, layout }),
+    inject: () => ({ url, filesUrl, layout }),
   }, PreviewPanel))
 }

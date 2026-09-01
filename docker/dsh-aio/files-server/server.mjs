@@ -9,8 +9,8 @@
 // The JSON API only lists directories below ROOT and never writes. Start with:
 //   node /workspaces/system-admin/files-server/server.mjs --port 6099
 import { createServer } from 'node:http'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, join, resolve, sep } from 'node:path'
+import { readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, extname, join, resolve, sep } from 'node:path'
 
 const ROOT = process.env.FILES_SERVER_ROOT || '/'
 // Directory shown on first open (must be under ROOT/==/ so the visitor can
@@ -72,7 +72,7 @@ async function load(dir){
     const li=document.createElement('li') ; if(c.dir) li.className='dir'
     const ic=document.createElement('span'); ic.className='icon'; ic.textContent=c.dir?'📁':'📄'
     const a=document.createElement('a'); a.textContent=c.name; a.href='#'
-    a.addEventListener('click',(e)=>{e.preventDefault(); if(c.dir){ load(c.path) } else { window.open('raw?path='+encodePath(c.path),'_blank') }})
+    a.addEventListener('click',(e)=>{e.preventDefault(); if(c.dir){ load(c.path) } else if(c.text){ window.open('edit?path='+encodePath(c.path),'_blank') } else { window.open('raw?path='+encodePath(c.path),'_blank') }})
     li.appendChild(ic); li.appendChild(a)
     if(!c.dir){ const s=document.createElement('span'); s.className='size'; s.textContent=c.size; li.appendChild(s) }
     ul.appendChild(li)
@@ -81,6 +81,64 @@ async function load(dir){
 }
 document.getElementById('up').addEventListener('click',async()=>{ const res=await fetch('api?path='+encodePath(current)); const d=await res.json(); if(d.parent) load(d.parent) })
 load(START)
+</script>
+</body>
+</html>`
+
+const EDITOR_HTML = `<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>文本编辑器</title>
+<style>
+:root{color-scheme:light dark}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:#1e1e1e;color:#e8e8e8;height:100vh;display:flex;flex-direction:column}
+header{position:sticky;top:0;background:#262626;border-bottom:1px solid #3a3a3a;
+  padding:8px 16px;display:flex;align-items:center;gap:10px}
+header h1{font-size:14px;margin:0;font-weight:600;flex:none}
+header .path{flex:1;margin:0;font-family:ui-monospace,Menlo,Consolas,monospace;
+  font-size:12px;color:#9cdcfe;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{background:#3a6ea5;border:none;color:#fff;padding:5px 12px;border-radius:6px;cursor:pointer;font-size:13px}
+button:disabled{opacity:.5;cursor:default}
+#info{font-size:12px;color:#9a9a9a;margin-left:auto}
+#wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+textarea{flex:1;resize:none;border:none;outline:none;background:#1e1e1e;color:#e8e8e8;
+  padding:12px 16px;font:13px/1.6 ui-monospace,Menlo,Consolas,monospace;tab-size:4;white-space:pre}
+</style>
+</head>
+<body>
+<header>
+  <h1>文本编辑器</h1>
+  <span class="path" id="path"></span>
+  <span id="info"></span>
+  <button id="save">保存</button>
+  <button id="close">关闭</button>
+</header>
+<div id="wrap"><textarea id="ta" spellcheck="false"></textarea></div>
+<script>
+const FILE = __PATH__
+const ta=document.getElementById('ta'), info=document.getElementById('info')
+let dirty=false
+async function load(){
+  try{
+    const r=await fetch('raw?path='+encodeURIComponent(FILE))
+    if(!r.ok) throw new Error(r.status)
+    ta.value=await r.text()
+    info.textContent=ta.value.split('\\n').length+' 行 · '+ta.value.length+' 字符'
+  }catch(e){ info.textContent='读取失败 '+e }
+}
+ta.addEventListener('input',()=>{ dirty=true; info.textContent='（已修改）' })
+document.getElementById('save').addEventListener('click',async()=>{
+  document.getElementById('save').disabled=true
+  const r=await fetch('save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({path:FILE,content:ta.value})})
+  const msg=await r.text(); info.textContent=r.ok?('已保存 '+new Date().toLocaleTimeString()):('保存失败 '+msg); dirty=false
+  document.getElementById('save').disabled=false
+})
+document.getElementById('close').addEventListener('click',()=>window.close())
+window.addEventListener('beforeunload',(e)=>{ if(dirty){ e.preventDefault(); e.returnValue='' } })
+load()
 </script>
 </body>
 </html>`
@@ -112,9 +170,11 @@ const server = createServer((req, res) => {
           const p = join(abs, e.name)
           let dir = e.isDirectory()
           let size = ''
+          let text = false
           if (e.isFile()) { try { size = fmt(statSync(p).size) } catch {} }
           else if (e.isSymbolicLink()) { try { dir = statSync(p).isDirectory() } catch { return null } }
-          return { name: e.name, path: p, dir, size }
+          if (!dir) { try { text = isTextFile(p) } catch {} }
+          return { name: e.name, path: p, dir, size, text }
         })
         .filter(Boolean)
         .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name, 'zh'))
@@ -133,11 +193,56 @@ const server = createServer((req, res) => {
       } catch { res.writeHead(404).end('not found') }
       return
     }
+    if (url.pathname === '/edit') {
+      const p = underRoot(url.searchParams.get('path') || '')
+      if (!p) { res.writeHead(403).end('outside root'); return }
+      let st; try { st = statSync(p) } catch { res.writeHead(404).end('not found'); return }
+      if (!st.isFile()) { res.writeHead(400).end('not a file'); return }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(EDITOR_HTML.replace('__PATH__', JSON.stringify(p)))
+      return
+    }
+    if (url.pathname === '/save') {
+      let body = ''
+      req.setEncoding('utf8')
+      req.on('data', (c) => { body += c; if (body.length > 64 * 1024 * 1024) req.destroy() })
+      req.on('end', () => {
+        let path, content
+        try { ({ path, content } = JSON.parse(body)) } catch { res.writeHead(400).end('bad json'); return }
+        const p = underRoot(path || '')
+        if (!p) { res.writeHead(403).end('outside root'); return }
+        try {
+          const st = statSync(p)
+          if (!st.isFile()) { res.writeHead(400).end('not a file'); return }
+          writeFileSync(p, content)
+          res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' }).end('ok')
+        } catch (err) { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }).end(String(err)) }
+      })
+      return
+    }
     res.writeHead(404).end('not found')
   } catch (err) {
     res.writeHead(500).end(String(err))
   }
 })
+
+const TEXT_EXT = new Set(['.txt','.md','.markdown','.json','.js','.jsx','.ts','.tsx','.mjs','.cjs','.py','.sh','.bash','.zsh','.yaml','.yml','.toml','.ini','.conf','.cfg','.log','.csv','.tsv','.html','.htm','.css','.scss','.less','.xml','.svg','.env','.vue','.wxml','.wxss','.graphql','.sql','.proto','.dockerfile','.gitignore','.editorconfig','.flow','.go','.java','.c','.h','.cpp','.hpp','.rs','.rb','.php','.lua','.pl','.r','.swift','.kt','.scala','.dart','.lock','.gradle','.properties','.gitconfig','.npmrc','.gitattributes'])
+
+/** Heuristic: is this file safe/expected to edit as text? */
+function isTextFile(p) {
+  const ext = extname(p).toLowerCase()
+  if (TEXT_EXT.has(ext)) return true
+  // No known extension: sniff the head for anything that is clearly binary.
+  let buf
+  try { buf = readFileSync(p).subarray(0, 8192) } catch { return false }
+  if (buf.includes(0)) return false
+  // Count control bytes (excluding common text whitespace) to reject binaries.
+  let ctrl = 0
+  for (const b of buf) {
+    if (b < 32 && b !== 9 && b !== 10 && b !== 13 && b !== 27 && b !== 12) ctrl++
+  }
+  return ctrl / Math.max(buf.length, 1) < 0.15
+}
 
 function fmt(n) {
   if (n < 1024) return n + ' B'

@@ -23,24 +23,34 @@
 //      and the noVNC <canvas> appears and PAINTS (non-zero width and
 //      height) — i.e. the RFB session connected to the desktop. A
 //      screenshot is saved to docker/dsh-aio/logs/novnc-verify.png.
-//   5) The clipboard actually SYNCS in BOTH directions between the
-//      container X selections and the noVNC/RFB side. This uses xsel
-//      on DISPLAY=:99:
+//   5) The clipboard actually SYNCS in BOTH directions ACROSS THE noVNC/RFB
+//      BROWSER CHANNEL — this is the question the user asked ("can the VNC
+//      browser share the clipboard?"), so the browser/RFB leg is the ONLY
+//      thing that satisfies this mandatory check. This uses xsel on
+//      DISPLAY=:99 together with the live noVNC page:
 //        • REMOTE->LOCAL: a unique marker is pushed into the X CLIPBOARD
 //          with `xsel -i -b`; the running noVNC page must observe that
 //          exact text on the RFB clipboard side (noVNC clipboard panel
 //          textarea #noVNC_clipboard_text, fed by the RFB 'clipboard'
-//          event). If the Playwright-driven RFB leg is not observable in
-//          this sandbox, the check MANDATORILY falls back to proving the
-//          autocutsel bridge moved the X CLIPBOARD text into PRIMARY and
-//          the raw VNC cut buffer — text must actually move.
+//          event). Proven-via = "browser".
 //        • LOCAL->REMOTE: a second unique marker is pushed from the
-//          noVNC clipboard panel toward the server (RFB.clipboardPasteFrom),
-//          and `xsel -o -b` inside the container must read that exact text.
-//      This leg is MANDATORY: it FAILS LOUDLY (non-zero exit) if text does
-//      not actually move. It NEVER passes on autocutsel process-presence
-//      alone. The concrete marker strings observed on each side are logged
-//      as evidence.
+//          noVNC clipboard panel toward the server (RFB.clipboardPasteFrom).
+//          To prove the paste actually CROSSED the RFB channel (not merely
+//          that the panel DOM exists), the container CLIPBOARD is CLEARED to
+//          a sentinel BEFORE the push and `xsel -o -b` must then read back
+//          the exact marker. Proven-via = "browser".
+//      This leg is MANDATORY and browser-only: it FAILS LOUDLY (non-zero
+//      exit) if the marker does not cross the RFB channel in BOTH directions.
+//      It NEVER passes on autocutsel process-presence alone, and NEVER passes
+//      on the X-layer autocutsel bridge alone.
+//
+//      The X-layer autocutsel bridge (CLIPBOARD<->PRIMARY<->cut buffer,
+//      entirely inside X with no browser involvement) is exercised only as a
+//      SECONDARY diagnostic, recorded as a separate non-mandatory line tagged
+//      "x-bridge". A bridge-only result can NEVER read as a browser-proven
+//      pass: it does not contribute to remoteOk/localOk and does not flip the
+//      mandatory clipboard check. The concrete marker strings observed on each
+//      side, and the per-direction proven-via tag, are logged as evidence.
 //
 // Environment knobs:
 //   NOVNC_URL   noVNC base URL   (default http://localhost:6080)
@@ -221,7 +231,10 @@ async function readNovncClipboardText(page) {
  * Push text toward the RFB server through the noVNC clipboard panel:
  * open the panel, set the textarea, and dispatch the `change` event
  * noVNC listens for (its handler calls RFB.clipboardPasteFrom).
- * Returns true if the panel elements were present and driven.
+ * Returns true if the panel elements were present and driven. A true here
+ * only means the DOM was driven; it is NOT proof the paste crossed the RFB
+ * channel — the caller confirms that with a container-side xsel readback
+ * against a pre-cleared CLIPBOARD.
  */
 async function pushNovncClipboardText(page, text) {
   return page.evaluate(marker => {
@@ -236,41 +249,80 @@ async function pushNovncClipboardText(page, text) {
   }, text)
 }
 
+/** Overwrite the container X CLIPBOARD with a sentinel so a stale value can
+ * never be mistaken for a fresh cross-channel readback. */
+async function xselClearClipboard(sentinel) {
+  await containerBash(`printf %s ${shellSingleQuote(sentinel)} | DISPLAY=:99 xsel -i -b`)
+}
+
 /**
- * MANDATORY bidirectional clipboard round-trip. Fails loudly (records a
- * FAIL, which drives process.exit(1)) if text does NOT actually move.
- * Never passes on autocutsel process-presence alone.
+ * Read the X-layer autocutsel bridge state as a SECONDARY diagnostic: after a
+ * marker is placed on CLIPBOARD, autocutsel mirrors it into PRIMARY and the
+ * raw cut buffer entirely inside X, with no browser/RFB involvement. Returns
+ * whether the marker reached a far-side X selection, for a strictly-labelled
+ * "x-bridge" diagnostic line that NEVER satisfies the browser clipboard claim.
+ */
+async function probeXBridge(marker) {
+  const script = [
+    'export DISPLAY=:99',
+    'sleep 1', // autocutsel mirrors CLIPBOARD<->cutbuffer<->PRIMARY; give it a moment.
+    'PRIMARY="$(xsel -o -p 2>/dev/null || true)"',
+    'CUT="$(xsel -o 2>/dev/null || true)"',
+    'printf "PRIMARY:%s\\nCUT:%s\\n" "$PRIMARY" "$CUT"',
+  ].join('\n')
+  const { stdout } = await containerBash(script)
+  const primary = /PRIMARY:(.*)/.exec(stdout)?.[1]?.trim()
+  const cut = /CUT:(.*)/.exec(stdout)?.[1]?.trim()
+  return { moved: primary === marker || cut === marker, primary, cut }
+}
+
+/**
+ * MANDATORY bidirectional clipboard round-trip ACROSS THE noVNC/RFB BROWSER
+ * CHANNEL. This is the direct answer to "can the VNC browser share the
+ * clipboard?", so ONLY the browser/RFB leg satisfies it. Fails loudly (records
+ * a FAIL that drives process.exit(1)) unless BOTH directions cross the RFB
+ * channel. It never passes on autocutsel process-presence and never passes on
+ * the X-layer autocutsel bridge alone.
  *
- * REMOTE->LOCAL: set a unique marker into the X CLIPBOARD with `xsel -i -b`,
- * then prove it reached the noVNC/RFB side. Preferred proof: the noVNC
- * clipboard panel textarea (#noVNC_clipboard_text) shows the marker. If the
- * RFB clipboard event is not observable in this sandbox, MANDATORILY prove
- * the autocutsel bridge moved the CLIPBOARD text into PRIMARY and the raw
- * TigerVNC cut buffer (`vncconfig -get` / xsel PRIMARY) — text must move.
+ * REMOTE->LOCAL (browser): set a unique marker into the X CLIPBOARD with
+ * `xsel -i -b`; the noVNC page must surface it in #noVNC_clipboard_text (fed
+ * by the RFB 'clipboard' event). provenVia = "browser".
  *
- * LOCAL->REMOTE: push a second unique marker from the noVNC clipboard panel
- * toward the server, then read `xsel -o -b` inside the container and assert
- * it equals that marker.
+ * LOCAL->REMOTE (browser): CLEAR the container CLIPBOARD to a sentinel, push a
+ * second unique marker from the noVNC clipboard panel toward the server
+ * (RFB.clipboardPasteFrom), then read `xsel -o -b`. The readback must equal
+ * the marker — proving the paste crossed the RFB channel rather than inferring
+ * success from the panel DOM being present. provenVia = "browser".
+ *
+ * The X-layer autocutsel bridge is probed separately as a non-mandatory
+ * diagnostic and reported on its own line tagged "x-bridge"; it does NOT
+ * contribute to the returned boolean.
  *
  * @param {import('playwright').Page | null} page live noVNC page, or null if
- *        the canvas leg failed (then only the X-layer bridge is exercised).
- * @returns {Promise<boolean>} true only if at least one direction is proven
- *        end-to-end AND no attempted direction moved the wrong/no text.
+ *        the canvas leg failed (then the browser leg cannot run and this check
+ *        FAILS — the browser is the mandatory criterion).
+ * @returns {Promise<boolean>} true only if BOTH directions crossed the RFB
+ *        browser channel.
  */
 async function checkClipboardRoundTrip(page) {
   const stamp = Date.now()
   const remoteMarker = `dsh-aio-remote-${stamp}`
   const localMarker = `dsh-aio-local-${stamp}`
-  let remoteOk = false
-  let localOk = false
+  const sentinel = `dsh-aio-sentinel-${stamp}`
+  // Per-direction proof tag: 'browser' (RFB channel) or null (not proven).
+  let remoteVia = null
+  let localVia = null
+  // Secondary X-bridge diagnostics, reported separately, never mandatory.
+  let xBridgeRemote = null
+  let xBridgeLocal = null
   const evidence = []
 
-  // ---- REMOTE -> LOCAL (container X CLIPBOARD -> noVNC/RFB) ----
+  // ---- REMOTE -> LOCAL (container X CLIPBOARD -> noVNC/RFB browser) ----
   try {
     await xselWriteClipboard(remoteMarker)
     evidence.push(`X CLIPBOARD set to "${remoteMarker}"`)
 
-    // Preferred: the noVNC page received it on the RFB clipboard channel.
+    // MANDATORY browser leg: the noVNC page received it on the RFB channel.
     if (page) {
       let observed = null
       for (let i = 0; i < 40 && observed !== remoteMarker; i++) {
@@ -279,69 +331,77 @@ async function checkClipboardRoundTrip(page) {
         await new Promise(r => setTimeout(r, 500))
       }
       if (observed === remoteMarker) {
-        remoteOk = true
-        evidence.push(`noVNC #noVNC_clipboard_text observed "${observed}"`)
+        remoteVia = 'browser'
+        evidence.push(`[browser] noVNC #noVNC_clipboard_text observed "${observed}"`)
       } else {
-        evidence.push(`noVNC clipboard panel did not surface the marker (saw ${JSON.stringify(observed)})`)
+        evidence.push(`[browser] noVNC clipboard panel did not surface the marker (saw ${JSON.stringify(observed)})`)
       }
+    } else {
+      evidence.push('[browser] REMOTE->LOCAL skipped: no live noVNC page (canvas leg failed)')
     }
 
-    // MANDATORY fallback: prove autocutsel moved CLIPBOARD text end-to-end at
-    // the X/VNC layer — into PRIMARY and into the TigerVNC cut buffer. If the
-    // marker actually moved off CLIPBOARD into these far-side selections, the
-    // bridge works even when the browser RFB clipboard event is unobservable.
-    if (!remoteOk) {
-      const script = [
-        'set -e',
-        'export DISPLAY=:99',
-        // autocutsel mirrors CLIPBOARD<->cutbuffer<->PRIMARY; give it a moment.
-        'sleep 1',
-        'PRIMARY="$(xsel -o -p 2>/dev/null || true)"',
-        'CUT="$(xsel -o 2>/dev/null || true)"', // default selection == CUT_BUFFER0 / PRIMARY-ish
-        'printf "PRIMARY:%s\\nCUT:%s\\n" "$PRIMARY" "$CUT"',
-      ].join('\n')
-      const { stdout } = await containerBash(script)
-      const primary = /PRIMARY:(.*)/.exec(stdout)?.[1]?.trim()
-      const cut = /CUT:(.*)/.exec(stdout)?.[1]?.trim()
-      evidence.push(`X-layer bridge: PRIMARY=${JSON.stringify(primary)} CUT=${JSON.stringify(cut)}`)
-      if (primary === remoteMarker || cut === remoteMarker) {
-        remoteOk = true
-        evidence.push('autocutsel mirrored CLIPBOARD text to the far-side selection (text moved)')
-      }
-    }
+    // SECONDARY diagnostic only: did autocutsel mirror CLIPBOARD into the
+    // far-side X selections? This is the X-layer bridge, NOT the browser, and
+    // never satisfies the mandatory browser clipboard claim.
+    const bridge = await probeXBridge(remoteMarker)
+    xBridgeRemote = bridge.moved
+    evidence.push(`[x-bridge] PRIMARY=${JSON.stringify(bridge.primary)} CUT=${JSON.stringify(bridge.cut)} moved=${bridge.moved}`)
   } catch (err) {
     evidence.push(`REMOTE->LOCAL error: ${err?.message ?? err}`)
   }
 
-  // ---- LOCAL -> REMOTE (noVNC/RFB -> container X CLIPBOARD) ----
+  // ---- LOCAL -> REMOTE (noVNC/RFB browser -> container X CLIPBOARD) ----
   try {
-    let driven = false
     if (page) {
-      driven = await pushNovncClipboardText(page, localMarker)
-      evidence.push(driven ? `noVNC clipboard panel pushed "${localMarker}"` : 'noVNC clipboard panel not present')
+      // Clear CLIPBOARD to a sentinel first, so a positive readback can ONLY
+      // come from the RFB paste actually crossing the channel, not a stale or
+      // bridge-mirrored value left from the REMOTE->LOCAL leg.
+      await xselClearClipboard(sentinel)
+      const driven = await pushNovncClipboardText(page, localMarker)
+      evidence.push(driven
+        ? `[browser] noVNC clipboard panel pushed "${localMarker}" (CLIPBOARD pre-cleared to sentinel)`
+        : '[browser] noVNC clipboard panel not present')
+      if (driven) {
+        let readback = null
+        for (let i = 0; i < 40 && readback !== localMarker; i++) {
+          readback = (await xselReadClipboard())?.trim() ?? null
+          if (readback === localMarker) break
+          await new Promise(r => setTimeout(r, 500))
+        }
+        evidence.push(`[browser] container xsel -o -b read ${JSON.stringify(readback)}`)
+        if (readback === localMarker) {
+          localVia = 'browser'
+        }
+      }
+    } else {
+      evidence.push('[browser] LOCAL->REMOTE skipped: no live noVNC page (canvas leg failed)')
     }
-    // Whether driven from the panel or (fallback) written to the far-side
-    // selection, the container CLIPBOARD must end up holding the marker.
-    if (!driven) {
-      // X-layer fallback: seed PRIMARY and let autocutsel mirror it to CLIPBOARD.
-      await containerBash(`printf %s ${shellSingleQuote(localMarker)} | DISPLAY=:99 xsel -i -p`)
-      evidence.push(`X PRIMARY set to "${localMarker}" (panel unavailable; testing bridge to CLIPBOARD)`)
+
+    // SECONDARY diagnostic only: seed PRIMARY and confirm autocutsel mirrors
+    // it into CLIPBOARD entirely inside X. Tagged x-bridge; never mandatory.
+    const bridgeMarker = `${localMarker}-xb`
+    await containerBash(`printf %s ${shellSingleQuote(bridgeMarker)} | DISPLAY=:99 xsel -i -p`)
+    let bridgeReadback = null
+    for (let i = 0; i < 10 && bridgeReadback !== bridgeMarker; i++) {
+      bridgeReadback = (await xselReadClipboard())?.trim() ?? null
+      if (bridgeReadback === bridgeMarker) break
+      await new Promise(r => setTimeout(r, 300))
     }
-    let readback = null
-    for (let i = 0; i < 40 && readback !== localMarker; i++) {
-      readback = (await xselReadClipboard())?.trim() ?? null
-      if (readback === localMarker) break
-      await new Promise(r => setTimeout(r, 500))
-    }
-    evidence.push(`container xsel -o -b read ${JSON.stringify(readback)}`)
-    if (readback === localMarker) localOk = true
+    xBridgeLocal = bridgeReadback === bridgeMarker
+    evidence.push(`[x-bridge] PRIMARY->CLIPBOARD mirror read ${JSON.stringify(bridgeReadback)} moved=${xBridgeLocal}`)
   } catch (err) {
     evidence.push(`LOCAL->REMOTE error: ${err?.message ?? err}`)
   }
 
+  const remoteOk = remoteVia === 'browser'
+  const localOk = localVia === 'browser'
   const ok = remoteOk && localOk
-  const detail = `${ok ? 'both directions proven' : `REMOTE->LOCAL=${remoteOk} LOCAL->REMOTE=${localOk}`}; evidence: ${evidence.join(' | ')}`
-  record('clipboard round-trip (bidirectional)', ok, detail)
+  const summary = ok
+    ? 'both directions proven across the RFB browser channel'
+    : `REMOTE->LOCAL via=${remoteVia ?? 'none'} LOCAL->REMOTE via=${localVia ?? 'none'}` +
+      ` (X-bridge diagnostic: remote=${xBridgeRemote} local=${xBridgeLocal}; the X-bridge does NOT satisfy the browser clipboard requirement)`
+  const detail = `${summary}; proven-via: REMOTE->LOCAL=${remoteVia ?? 'none'}, LOCAL->REMOTE=${localVia ?? 'none'}; evidence: ${evidence.join(' | ')}`
+  record('clipboard round-trip (bidirectional, browser/RFB leg)', ok, detail)
   return ok
 }
 
@@ -357,8 +417,8 @@ async function main() {
   const canvas = await checkNovncCanvas()
   let clipboardOk = false
   try {
-    // Reuse the live noVNC page for the RFB clipboard legs; the X-layer
-    // bridge fallback runs even when the page is null.
+    // The clipboard round-trip requires the live noVNC page: the browser/RFB
+    // leg is the mandatory criterion. Without a page it cannot pass.
     clipboardOk = await checkClipboardRoundTrip(canvas.page)
   } finally {
     await canvas.browser?.close()
@@ -370,7 +430,7 @@ async function main() {
   console.log('')
   console.log('----------------------------------------')
   if (allPass) {
-    console.log('RESULT: ✅ PASS — dsh web + noVNC serve, both autocutsel instances run, noVNC canvas painted, clipboard syncs both ways.')
+    console.log('RESULT: ✅ PASS — dsh web + noVNC serve, both autocutsel instances run, noVNC canvas painted, clipboard syncs both ways ACROSS THE noVNC/RFB BROWSER CHANNEL (proven per-direction, not via the X-layer bridge).')
   } else {
     const failed = Object.entries(mandatory).filter(([, ok]) => !ok).map(([k]) => k)
     console.log(`RESULT: ❌ FAIL — failing mandatory checks: ${failed.join(', ')}`)

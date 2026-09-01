@@ -73,6 +73,15 @@ docker exec dsh-aio bash -lc '
 '
 ```
 
+## The mandatory clipboard check is the browser/RFB leg only
+
+The verifier answers one question — can the noVNC browser share the container clipboard — so the mandatory clipboard check is satisfied ONLY by text crossing the RFB browser channel. Each direction records a proven-via tag:
+
+- `REMOTE->LOCAL` passes only when the live noVNC page surfaces the marker in `#noVNC_clipboard_text` (fed by the RFB `clipboard` event); provenVia = `browser`.
+- `LOCAL->REMOTE` clears the container CLIPBOARD to a fresh sentinel, pushes the marker from the noVNC panel (`RFB.clipboardPasteFrom`), then requires `xsel -o -b` to read back that exact marker. Because the CLIPBOARD was pre-cleared, a positive readback can only come from the paste crossing the RFB channel, not from a stale value or an autocutsel mirror of the earlier `REMOTE->LOCAL` marker. Panel-DOM presence alone is not accepted as proof; provenVia = `browser`.
+
+The autocutsel X-layer bridge (CLIPBOARD<->PRIMARY<->cut buffer, entirely inside X) is probed separately and reported on its own `[x-bridge]` evidence line. It is a non-mandatory diagnostic: it never contributes to the per-direction pass and never flips the `RESULT`. A build whose RFB clipboard path is broken but whose autocutsel is healthy therefore FAILS the mandatory check even though the `[x-bridge]` line still reports `moved=true`. Without a live noVNC page the browser leg cannot run and the clipboard check FAILS (the canvas check fails in that case too).
+
 ## Clipboard verification result (real markers observed on each side)
 
 Full verifier output of the passing run:
@@ -85,31 +94,33 @@ DSH_URL=http://127.0.0.1:3080  NOVNC_URL=http://127.0.0.1:6080  CONTAINER=__inpr
 [PASS] noVNC vnc.html HTTP 200 — http://127.0.0.1:6080/vnc.html -> HTTP 200
 [PASS] autocutsel CLIPBOARD + PRIMARY running — both instances found
 [PASS] noVNC canvas painted — canvas 1280x720; screenshot -> /app/apps/web/logs/novnc-verify.png
-[PASS] clipboard round-trip (bidirectional) — both directions proven; evidence:
-       X CLIPBOARD set to "dsh-aio-remote-1788255692860"
-       | noVNC #noVNC_clipboard_text observed "dsh-aio-remote-1788255692860"
-       | noVNC clipboard panel pushed "dsh-aio-local-1788255692860"
-       | container xsel -o -b read "dsh-aio-local-1788255692860"
+[PASS] clipboard round-trip (bidirectional, browser/RFB leg) — both directions proven across the RFB browser channel; proven-via: REMOTE->LOCAL=browser, LOCAL->REMOTE=browser; evidence:
+       X CLIPBOARD set to "dsh-aio-remote-1788256334251"
+       | [browser] noVNC #noVNC_clipboard_text observed "dsh-aio-remote-1788256334251"
+       | [x-bridge] PRIMARY="dsh-aio-remote-1788256334251" CUT="dsh-aio-remote-1788256334251" moved=true
+       | [browser] noVNC clipboard panel pushed "dsh-aio-local-1788256334251" (CLIPBOARD pre-cleared to sentinel)
+       | [browser] container xsel -o -b read "dsh-aio-local-1788256334251"
+       | [x-bridge] PRIMARY->CLIPBOARD mirror read "dsh-aio-local-1788256334251-xb" moved=true
 
 ----------------------------------------
-RESULT: ✅ PASS — dsh web + noVNC serve, both autocutsel instances run, noVNC canvas painted, clipboard syncs both ways.
+RESULT: ✅ PASS — dsh web + noVNC serve, both autocutsel instances run, noVNC canvas painted, clipboard syncs both ways ACROSS THE noVNC/RFB BROWSER CHANNEL (proven per-direction, not via the X-layer bridge).
 ----------------------------------------
 ```
 
 ### Which legs were exercised end-to-end vs assumed
 
-- **REMOTE -> LOCAL (container X CLIPBOARD -> noVNC browser): PROVEN end-to-end via the real RFB browser leg.** `printf %s dsh-aio-remote-1788255692860 | DISPLAY=:99 xsel -i -b` set the container CLIPBOARD; the live noVNC page's clipboard-panel textarea `#noVNC_clipboard_text`, which is fed by the RFB `clipboard` event, then showed the exact same string. Text crossed the RFB channel from the container into the browser.
-- **LOCAL -> REMOTE (noVNC browser -> container X CLIPBOARD): PROVEN end-to-end via the real RFB browser leg.** The verifier drove the noVNC clipboard panel (`RFB.clipboardPasteFrom`) with `dsh-aio-local-1788255692860`; `DISPLAY=:99 xsel -o -b` inside the container then read back that exact string. Text crossed the RFB channel from the browser into the container X CLIPBOARD.
-- **autocutsel X-layer bridge: also independently PROVEN** in the run made before the Playwright browser was installed (canvas leg unavailable). With the browser page absent, the verifier's mandatory X-layer fallback set X CLIPBOARD to `dsh-aio-remote-1788255643997` and observed `autocutsel` mirror it into PRIMARY and the raw cut buffer (`PRIMARY=... CUT=...` both equal the marker), then seeded PRIMARY with `dsh-aio-local-1788255643997` and read it back off CLIPBOARD — text actually moved between the X selections and the VNC cut buffer, not merely a process being present.
+- **REMOTE -> LOCAL (container X CLIPBOARD -> noVNC browser): PROVEN end-to-end via the real RFB browser leg (provenVia=browser).** `printf %s dsh-aio-remote-1788256334251 | DISPLAY=:99 xsel -i -b` set the container CLIPBOARD; the live noVNC page's clipboard-panel textarea `#noVNC_clipboard_text`, fed by the RFB `clipboard` event, then showed the exact same string. Text crossed the RFB channel from the container into the browser. This is the mandatory criterion; the run would have FAILED had the panel not surfaced the marker — the `[x-bridge]` mirror is reported alongside but cannot satisfy this direction.
+- **LOCAL -> REMOTE (noVNC browser -> container X CLIPBOARD): PROVEN end-to-end via the real RFB browser leg (provenVia=browser).** The verifier first cleared the container CLIPBOARD to `dsh-aio-sentinel-1788256334251`, then drove the noVNC clipboard panel (`RFB.clipboardPasteFrom`) with `dsh-aio-local-1788256334251`; `DISPLAY=:99 xsel -o -b` inside the container then read back that exact string. Because CLIPBOARD held only the sentinel before the push, the readback proves the paste crossed the RFB channel rather than reflecting a stale value or an autocutsel mirror. Panel-DOM presence alone is not treated as proof.
+- **autocutsel X-layer bridge: reported as a SECONDARY diagnostic only, not as the clipboard pass.** Each direction also probes whether autocutsel mirrors the marker among CLIPBOARD/PRIMARY/cut buffer entirely inside X (`[x-bridge] ... moved=true`). This is an X-internal loop with no browser involvement; it does not contribute to the per-direction pass and never flips the `RESULT`. It is recorded because a broken bridge would still be worth seeing, but a bridge-only result reads as a FAIL of the mandatory browser check, never a PASS.
 - **noVNC canvas paint: PROVEN.** The RFB session connected and drew a 1280x720 canvas; screenshot saved to `docker/dsh-aio/logs/novnc-verify.png` (gitignored).
 
-Nothing here rests on process-presence alone: every clipboard claim is backed by a unique marker string observed moving to the far side.
+Nothing here rests on process-presence alone, and nothing rests on the X-layer bridge: every mandatory clipboard claim is backed by a unique marker crossing the RFB browser channel, verified per direction with a proven-via tag. The verifier catches a regression that breaks only the RFB clipboard path even while autocutsel stays healthy, because the healthy `[x-bridge]` line no longer counts toward the pass.
 
 ## Entrypoint / Dockerfile fixes made
 
 None were needed for the clipboard bridge. The FEAT-001 change (append `xsel` to the existing apt `autocutsel` line across all four apt-owning dsh-aio Dockerfiles, and make the verifier's round-trip mandatory) is sufficient: `entrypoint.sh` already forks `autocutsel -selection CLIPBOARD -fork` and `autocutsel -selection PRIMARY -fork` before Chrome, and both instances run and bridge correctly. The PID1 stall observed under `docker run -d` is a rootless-podman idle-teardown artifact of this sandbox, not an image defect — the same `entrypoint.sh` brings the full stack up when run as a child process.
 
-Known gap for reproducibility (not a clipboard-bridge issue): the image does not bundle Playwright's chromium browser, so the canvas leg of the verifier requires a one-time `playwright install chromium` inside the container (or running against a host with the browser cached). The clipboard X-layer bridge itself does not depend on Playwright and was proven with `xsel` alone in the pre-install run.
+Known gap for reproducibility (not a clipboard-bridge issue): the image does not bundle Playwright's chromium browser, so both the canvas leg AND the mandatory browser clipboard leg of the verifier require a one-time `playwright install chromium` inside the container (or running against a host with the browser cached). Without the browser, the verifier FAILS the mandatory clipboard check rather than degrading to an X-layer-only pass — the `[x-bridge]` diagnostic is not accepted as proof that the noVNC browser shares the clipboard.
 
 ## Bottom line
 

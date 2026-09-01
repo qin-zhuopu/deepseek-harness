@@ -30,6 +30,12 @@ ARG NODE_IMAGE=node:24
 #                     受限网络的构建者传入内网镜像 URL（与 DSH_IMAGE/CHROME_BASE_IMAGE/
 #                     NODE_IMAGE 以及 nexus.jereh.cn 的重定向理念一致）。
 ARG JCLI_DOWNLOAD_BASE=https://github.com/jenkins-zh/jenkins-cli/releases/latest/download
+# NPM_REGISTRY        npm/pnpm 的 registry，可重定向到内网镜像。默认内网 nexus（内网
+#                     构建保持字节级不变），无法访问 nexus 的构建者传入公网/镜像地址，
+#                     例如 --build-arg NPM_REGISTRY=https://registry.npmjs.org/（与
+#                     DSH_IMAGE/CHROME_BASE_IMAGE/NODE_IMAGE/JCLI_DOWNLOAD_BASE 的
+#                     重定向理念一致）。ARG 不跨 FROM，运行时 stage 内需重新声明。
+ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
 
 # ---- Stage 1: reuse the already-built dsh app ----
 FROM ${DSH_IMAGE} AS dshbuild
@@ -47,8 +53,11 @@ FROM ${CHROME_BASE_IMAGE}
 COPY --from=noderuntime /usr/local/bin/node /opt/node/bin/node
 COPY --from=noderuntime /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
 ENV PATH=/opt/node/bin:$PATH
+# Re-declare NPM_REGISTRY inside this runtime stage: ARGs do not cross FROM
+# boundaries, so the top-level default above is invisible here without this line.
+ARG NPM_REGISTRY
 RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
- && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \
+ && npm config set registry ${NPM_REGISTRY} \
  && npm install -g pnpm@11.7.0 chrome-devtools-mcp@1.7.0
 
 # Display/VNC stack: Xvnc (X server + VNC server with dynamic RandR sizes),

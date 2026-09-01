@@ -23,7 +23,12 @@ FROM ${NODE_IMAGE}
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 
 # ── npm through the internal Nexus ──
-RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
+# NPM_REGISTRY mirrors the NODE_IMAGE redirect philosophy: it defaults to the
+# internal nexus mirror (so internal builds are byte-for-byte unchanged) but is
+# overridable for builds that cannot reach nexus, e.g.
+# --build-arg NPM_REGISTRY=https://registry.npmjs.org/.
+ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
+RUN npm config set registry ${NPM_REGISTRY}
 
 # ── app ──
 WORKDIR /app

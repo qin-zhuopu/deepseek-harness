@@ -47,6 +47,7 @@ RUN sed -i 's|http://mirrors.aliyun.com/ubuntu/|http://10.1.7.49:8081/repository
  && apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
+      autocutsel \
  && rm -rf /var/lib/apt/lists/*
 
 # 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。

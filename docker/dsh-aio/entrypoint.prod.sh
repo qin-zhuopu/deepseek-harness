@@ -105,6 +105,16 @@ fluxbox >/dev/null 2>&1 &
 log "noVNC (websockify) ${BIND_ADDR}:${NOVNC_PORT}"
 websockify --web=/usr/share/novnc "${BIND_ADDR}:${NOVNC_PORT}" "localhost:${VNC_PORT}" &
 
+# Clipboard bridge: nothing else keeps the X selections in sync with the VNC
+# cut buffer, so copy/paste between the container desktop (Chrome) and the
+# noVNC/host clipboard would otherwise need noVNC's manual clipboard panel.
+# autocutsel mirrors both X selections against the RFB cut buffer — CLIPBOARD
+# (Ctrl-C/Ctrl-V) and PRIMARY (middle-click) — started before Chrome so the
+# clipboard is live from the first window. -fork daemonizes each instance.
+log "autocutsel clipboard sync (CLIPBOARD + PRIMARY)"
+autocutsel -selection CLIPBOARD -fork
+autocutsel -selection PRIMARY -fork
+
 log "vnc-resize-sidecar on ${SIDECAR_BIND}:${SIDECAR_PORT}"
 python3 /usr/local/bin/vnc-resize-sidecar.py &
 

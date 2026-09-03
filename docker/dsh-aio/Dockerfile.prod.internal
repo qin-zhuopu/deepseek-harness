@@ -28,7 +28,7 @@
 
 # ---- Stage 1: reuse the already-built dsh app (compiled lib/ + web dist) ----
 FROM dsh:dev AS dshbuild
-# /app is fully installed + built here.
+# /workspaces/deepseek-harness is fully installed + built here.
 
 # ---- Stage 2: runtime on the Chrome base ----
 FROM harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
@@ -82,7 +82,7 @@ RUN chmod +x /usr/local/bin/vnc-resize-sidecar.py \
  && python3 /usr/local/bin/patch-vnc-html.py /usr/share/novnc/vnc.html
 
 # The built dsh application.
-COPY --from=dshbuild /app /app
+COPY --from=dshbuild /workspaces/deepseek-harness /workspaces/deepseek-harness
 
 # Pre-wired DSH_HOME: web profile, nr provider, default model, chrome MCP patch.
 # (no credentials, no sessions — NR_API_KEY comes from -e at runtime)

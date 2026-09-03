@@ -24,7 +24,7 @@ RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
 
 # ── app ──
-WORKDIR /app
+WORKDIR /workspaces/deepseek-harness
 COPY . .
 
 # Install (lockfile may carry local mirror/policy tweaks)

@@ -129,7 +129,7 @@ declared: true`。没有单独的"添加自定义 provider"调用 —— 在 set
 
 ### 6. 端到端冒烟测试
 
-`session.create`(`{ "cwd": "/app" }`)→ `session.prompt`
+`session.create`(`{ "cwd": "/workspaces/deepseek-harness" }`)→ `session.prompt`
 (`{ sessionId, "mode": "queue", "content": [{ "type": "text", "text": "你好" }] }`)
 → 轮询 `session.history`。健康的一轮以 `turn/end` 和 `stopReason: stop` 结束,且
 `assistant/message` 事件的 `source` 标明 `provider: nr, model: kr/claude-opus-4.8` ——

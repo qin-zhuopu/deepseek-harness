@@ -62,7 +62,7 @@ def call(m,p):
     headers={"content-type":"application/json","Origin":"http://127.0.0.1:3080"},
     method="POST"),timeout=30)
   return json.loads(r.read().decode())
-c=call("session.create",{"cwd":"/app"})
+c=call("session.create",{"cwd":"/workspaces/deepseek-harness"})
 sid=c["result"]["value"]["sessionId"]
 prompt=("请使用你的 chrome 浏览器工具（mcp__chrome__ 开头的工具）打开百度首页 "
         "https://www.baidu.com ，然后用 list_pages 确认页面已打开，并告诉我页面标题。")

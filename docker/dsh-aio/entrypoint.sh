@@ -111,7 +111,7 @@ fi
 # documents. Reusable because `dev:web` (DEV_WATCH) rebuilds apps/web/dist and
 # drops the injection — a background loop below re-applies it. Idempotent: the
 # marker comment keeps a restart or the loop from stacking injections.
-WEB_INDEX=/app/apps/web/dist/index.html
+WEB_INDEX=/workspaces/deepseek-harness/apps/web/dist/index.html
 VNC_MARKER='dsh-vnc-preview-url'
 inject_vnc_preview() {
   [ -n "${VNC_PUBLIC_URL}" ] && [ -f "${WEB_INDEX}" ] || return 0
@@ -213,14 +213,14 @@ fi
 
 # DEV: run the tsx source dispatch (transpiles TypeScript at runtime).
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (tsx source dispatch)"
-cd /app
+cd /workspaces/deepseek-harness
 
 # Hot reload for the web client: `dsh web` stat-polls the bundles it serves and
 # broadcasts `rebuilt` frames; `dev:web` is the watch-build that rewrites those
 # bundles on source edits (scripts/dev-web.ts). Poll mode because container
 # filesystems often deliver no inotify events. Disable with DEV_WATCH=0.
 if [ "${DEV_WATCH:-1}" = 1 ]; then
-  log "dev:web watch-build enabled (DEV_WATCH=1; edits under /app hot-reload the web UI)"
+  log "dev:web watch-build enabled (DEV_WATCH=1; edits under /workspaces/deepseek-harness hot-reload the web UI)"
   (pnpm dev:web --poll >> /tmp/dev-web.log 2>&1 &)
   # dev:web rewrites apps/web/dist on every rebuild, dropping the VNC-preview
   # injection. Re-apply it whenever the marker goes missing (inject_vnc_preview

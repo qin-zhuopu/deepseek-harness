@@ -13,7 +13,7 @@
 服务。让容器里的 agent "用 chrome 工具打开百度",导航动作就发生在你能从 noVNC 标签页
 看到的那个 Chrome 里。
 
-镜像用两阶段构建:先复用已构建好的 `dsh:dev` 镜像拿到 `/app` 目录树,再在内网 Chrome
+镜像用两阶段构建:先复用已构建好的 `dsh:dev` 镜像拿到 `/workspaces/deepseek-harness` 目录树,再在内网 Chrome
 基础镜像(Ubuntu 24.04 + Google Chrome)上搭运行环境。一个 supervisor entrypoint 按序
 启动每个服务,并在启动 dsh 前等待 CDP 就绪,这样 MCP 客户端第一次连接就能成功。API
 密钥在运行时用 `-e` 注入,绝不烘焙进镜像层。
@@ -22,7 +22,7 @@
 
 | 层 | 提供 |
 |---|---|
-| `dsh:dev`(阶段一) | 完整安装并构建好的 dsh `/app` |
+| `dsh:dev`(阶段一) | 完整安装并构建好的 dsh `/workspaces/deepseek-harness` |
 | Chrome 基础镜像 | Google Chrome + 系统库 |
 | `/opt/node` | 隔离的 Node 24 + pnpm(见下) |
 | apt 包 | `xvfb x11vnc fluxbox novnc websockify x11-utils curl` |
@@ -51,7 +51,7 @@ RUN apt-get update \
       xvfb x11vnc fluxbox novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=dshbuild /app /app
+COPY --from=dshbuild /workspaces/deepseek-harness /workspaces/deepseek-harness
 COPY dshhome/.dsh /root/.dsh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -64,7 +64,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 **复用 `dsh:dev` 而非重新构建。** dsh 必须在 Debian(`node:24`)上构建;而 Chrome
 基础镜像是 Ubuntu、自带的 Node 又不可用。与其在运行镜像里再跑一遍
 `pnpm install && pnpm run build`(约 5 分钟),不如让阶段一直接 `FROM dsh:dev`,阶段二
-把它构建完成的 `/app` 拷过来。构建就简化成拷一个产物。
+把它构建完成的 `/workspaces/deepseek-harness` 拷过来。构建就简化成拷一个产物。
 
 **Node 隔离在 `/opt/node`,不碰系统前缀。** Chrome 基础镜像的 Node 只以 nvm 形式装在
 `/home/dev/.nvm/...` 下,属于 `dev` 用户、不在 root 的 PATH 里 —— 作为容器运行时不可用。
@@ -191,7 +191,7 @@ docker run -d --name dsh-aio --network host --shm-size=1g \
 自主调用 `mcp__chrome__*` 工具打开百度,全程记录日志,并从日志判定跑通。
 
 镜像源文件与验证脚本都放在 [`docker/dsh-aio/`](../../docker/dsh-aio/) 目录:
-[`Dockerfile`](../../docker/dsh-aio/Dockerfile)、supervisor
+[`Dockerfile.dev`](../../docker/dsh-aio/Dockerfile.dev)、supervisor
 [`entrypoint.sh`](../../docker/dsh-aio/entrypoint.sh)、
 烘焙的 [`cordis.patch.yml`](../../docker/dsh-aio/cordis.patch.yml)、以及
 [`verify-e2e.sh`](../../docker/dsh-aio/verify-e2e.sh)。脚本流程:(1) 用 `-e NR_API_KEY`

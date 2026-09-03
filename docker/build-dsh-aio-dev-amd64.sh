@@ -5,7 +5,7 @@
 #
 # 构建链（两步，chrome 运行底座直接用 harbor 已有的 amd64 版）：
 #   1. docker/dsh/Dockerfile         -> dsh:dev（pnpm install + build）
-#   2. docker/dsh-aio/Dockerfile     -> dsh-aio:dev（应用+Chrome+noVNC 一体）
+#   2. docker/dsh-aio/Dockerfile.dev     -> dsh-aio:dev（应用+Chrome+noVNC 一体）
 #      CHROME_BASE_IMAGE 默认即 harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
 #      （amd64 已发布；若拉不到，可先构建 docker/chrome-base/Dockerfile 传参替换）
 #
@@ -69,7 +69,7 @@ docker build \
   --build-arg "DSH_BUILD_TS=$BUILD_TS" \
   -t dsh-aio:dev-amd64 \
   -t "dsh-aio:dev-amd64-$COMMIT_SHORT" \
-  -f docker/dsh-aio/Dockerfile \
+  -f docker/dsh-aio/Dockerfile.dev \
   docker/dsh-aio
 
 log "构建完成：dsh-aio:dev-amd64 / dsh-aio:dev-amd64-$COMMIT_SHORT"

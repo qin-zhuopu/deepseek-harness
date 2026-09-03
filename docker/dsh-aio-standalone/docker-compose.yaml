@@ -25,7 +25,7 @@ services:
     # 拒绝绑 0.0.0.0，所以 -p 端口映射对它无效（映射的是宿主机网卡地址，
     # 打不到只监听 loopback 的进程）。同时 baked 进镜像的 MCP 客户端要走
     # 共享的宿主机 loopback 去连 Chrome(127.0.0.1:9222)。这点与
-    # docker/dsh-aio/Dockerfile 顶部注释一致。
+    # docker/dsh-aio/Dockerfile.dev 顶部注释一致。
     network_mode: host
     shm_size: 1g
     restart: unless-stopped

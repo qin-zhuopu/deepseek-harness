@@ -153,13 +153,13 @@ tar -cf - .git | ssh "${SSH_OPTS[@]}" "$SSH_CMD" "tar -xf - -C '$REMOTE_DIR'"
 ssh "${SSH_OPTS[@]}" "$SSH_CMD" \
   "cd '$REMOTE_DIR' && git config core.autocrlf false && git checkout -f '$COMMIT' && git clean -fdx"
 
-# 归一 worktree 专属的 hooks 路径为容器内路径 /app/.git/dsh-hooks。
+# 归一 worktree 专属的 hooks 路径为容器内路径 /workspaces/deepseek-harness/.git/dsh-hooks。
 # 本机 .git 的 config.worktree（core.hooksPath）与 dsh-hooks/.dsh-lefthook-owned
 # 记的是开发者工作副本的绝对路径（如 C:\\home\\...\\dsh-hooks），经 tar over ssh
 # 原样同步到构建机后烤进镜像，dev 容器每次启动跑 pnpm install 的 postinstall
 # （scripts/install-lefthook.mjs）在 Linux 下用 isAbsolute() 判定该 Windows 路径为无效
-# ownership marker，导致容器崩溃循环 Restarting(1)。镜像内 .git 恒位于 /app/.git，
-# 因此把这两处 hooks 路径统一重写为 /app/.git/dsh-hooks（文件缺失或已是容器路径则跳过）。
+# ownership marker，导致容器崩溃循环 Restarting(1)。镜像内 .git 恒位于 /workspaces/deepseek-harness/.git，
+# 因此把这两处 hooks 路径统一重写为 /workspaces/deepseek-harness/.git/dsh-hooks（文件缺失或已是容器路径则跳过）。
 # 实现：本地把修复脚本 base64 后经 ssh 编码传输（heredoc 直接嵌 ssh 双引号会被本地
 # bash 解析破坏反斜杠，base64 可规避转义地雷），构建机解码执行。
 NORMALIZE_HOOKS_PY=$(cat <<'PY'
@@ -167,7 +167,7 @@ import json, os, re
 changed = []
 if os.path.isfile('config.worktree'):
     s = open('config.worktree', encoding='utf-8').read()
-    n = re.sub(r'(hooksPath\s*=\s*).+', r'\1/app/.git/dsh-hooks', s)
+    n = re.sub(r'(hooksPath\s*=\s*).+', r'\1/workspaces/deepseek-harness/.git/dsh-hooks', s)
     if n != s:
         open('config.worktree', 'w', encoding='utf-8').write(n)
         changed.append('config.worktree')
@@ -178,7 +178,7 @@ if os.path.isfile(m):
     except Exception:
         d = None
     if isinstance(d, dict) and 'hooksPath' in d:
-        d['hooksPath'] = '/app/.git/dsh-hooks'
+        d['hooksPath'] = '/workspaces/deepseek-harness/.git/dsh-hooks'
         json.dump(d, open(m, 'w', encoding='utf-8'))
         changed.append(m)
 print('fixed: ' + (', '.join(changed) if changed else 'nothing to fix'))

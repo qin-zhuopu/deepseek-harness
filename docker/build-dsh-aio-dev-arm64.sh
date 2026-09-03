@@ -6,7 +6,7 @@
 #   1. docker/chrome-base/Dockerfile   -> dsh-chrome-base:24.04
 #      （harbor 的 ubuntu:24.04-…-chrome 只发 amd64，arm64 必须自建）
 #   2. docker/dsh/Dockerfile           -> dsh:dev（pnpm install + build）
-#   3. docker/dsh-aio/Dockerfile       -> dsh-aio:dev（应用+Chrome+noVNC 一体）
+#   3. docker/dsh-aio/Dockerfile.dev       -> dsh-aio:dev（应用+Chrome+noVNC 一体）
 #
 # 基础镜像 ubuntu:24.04 / node:24 由构建机 daemon.json 里的镜像加速器
 # （docker.1ms.run 等）代理拉取，不直连 Docker Hub——不要反复拉公网镜像。
@@ -74,7 +74,7 @@ docker build \
   --build-arg "DSH_BUILD_TS=$BUILD_TS" \
   -t dsh-aio:dev-arm64 \
   -t "dsh-aio:dev-arm64-$COMMIT_SHORT" \
-  -f docker/dsh-aio/Dockerfile \
+  -f docker/dsh-aio/Dockerfile.dev \
   docker/dsh-aio
 
 log "构建完成：dsh-aio:dev-arm64 / dsh-aio:dev-arm64-$COMMIT_SHORT"

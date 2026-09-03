@@ -15,7 +15,7 @@ agent to "open Baidu with the chrome tools" and the navigation happens in the
 Chrome you can see in the noVNC tab.
 
 The image is built in two stages: reuse the already-built `dsh:dev` image for
-the `/app` tree, then assemble the runtime on the internal Chrome base image
+the `/workspaces/deepseek-harness` tree, then assemble the runtime on the internal Chrome base image
 (Ubuntu 24.04 + Google Chrome). A supervisor entrypoint starts every service in
 order and waits for CDP before launching dsh, so the MCP client's first connect
 succeeds. The API key is injected at runtime with `-e`, never baked into a layer.
@@ -24,7 +24,7 @@ succeeds. The API key is injected at runtime with `-e`, never baked into a layer
 
 | Layer | Provides |
 |---|---|
-| `dsh:dev` (stage 1) | the fully installed + built dsh `/app` |
+| `dsh:dev` (stage 1) | the fully installed + built dsh `/workspaces/deepseek-harness` |
 | Chrome base image | Google Chrome + system libs |
 | `/opt/node` | an isolated Node 24 + pnpm (see below) |
 | apt packages | `xvfb x11vnc fluxbox novnc websockify x11-utils curl` |
@@ -53,7 +53,7 @@ RUN apt-get update \
       xvfb x11vnc fluxbox novnc websockify x11-utils curl \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=dshbuild /app /app
+COPY --from=dshbuild /workspaces/deepseek-harness /workspaces/deepseek-harness
 COPY dshhome/.dsh /root/.dsh
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
@@ -66,7 +66,7 @@ ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 **Reuse `dsh:dev` instead of rebuilding.** dsh must be built on Debian
 (`node:24`); the Chrome base is Ubuntu with an unusable Node. Rather than run
 `pnpm install && pnpm run build` again in the runtime image (~5 min), stage 1 is
-just `FROM dsh:dev` and stage 2 copies its finished `/app`. The build reduces to
+just `FROM dsh:dev` and stage 2 copies its finished `/workspaces/deepseek-harness`. The build reduces to
 copying an artifact.
 
 **Node isolated in `/opt/node`, not the system prefix.** The Chrome base ships
@@ -211,7 +211,7 @@ Baidu, with logs captured throughout and the verdict read back from those logs.
 
 The image sources and the verification harness live in
 [`docker/dsh-aio/`](../../docker/dsh-aio/): the
-[`Dockerfile`](../../docker/dsh-aio/Dockerfile), the supervisor
+[`Dockerfile.dev`](../../docker/dsh-aio/Dockerfile.dev), the supervisor
 [`entrypoint.sh`](../../docker/dsh-aio/entrypoint.sh), the baked
 [`cordis.patch.yml`](../../docker/dsh-aio/cordis.patch.yml), and
 [`verify-e2e.sh`](../../docker/dsh-aio/verify-e2e.sh). The harness: (1) restarts `dsh-aio` with `-e

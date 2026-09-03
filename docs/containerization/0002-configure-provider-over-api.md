@@ -143,7 +143,7 @@ the endpoint but never the key.
 
 ### 6. End-to-end smoke test
 
-`session.create` (`{ "cwd": "/app" }`) → `session.prompt`
+`session.create` (`{ "cwd": "/workspaces/deepseek-harness" }`) → `session.prompt`
 (`{ sessionId, "mode": "queue", "content": [{ "type": "text", "text": "你好" }] }`)
 → poll `session.history`. A healthy turn ends with `turn/end` and `stopReason:
 stop`, and the `assistant/message` event's `source` names

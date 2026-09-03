@@ -133,7 +133,7 @@ fi
 # the served index.html is the container-baked-script path that plugin
 # documents. Idempotent: the marker comment keeps a restart from stacking
 # injections, and the whole block is skipped when VNC_PUBLIC_URL is empty.
-WEB_INDEX=/app/apps/web/dist/index.html
+WEB_INDEX=/workspaces/deepseek-harness/apps/web/dist/index.html
 if [ -n "${VNC_PUBLIC_URL}" ] && [ -f "${WEB_INDEX}" ]; then
   VNC_PUBLIC_URL="${VNC_PUBLIC_URL%/}" \
   python3 - "${WEB_INDEX}" <<'PY'
@@ -239,5 +239,5 @@ fi
 
 # PRODUCTION: run the compiled entry, not the tsx source dispatch.
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (compiled entry)"
-cd /app
+cd /workspaces/deepseek-harness
 exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

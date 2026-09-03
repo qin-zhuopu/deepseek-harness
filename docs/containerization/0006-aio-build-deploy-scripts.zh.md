@@ -29,7 +29,7 @@ harbor 的 tag 约定、"代理拉取后推 harbor"规则,以及 deploy-info 打
 1. `docker/chrome-base/Dockerfile` → `dsh-chrome-base:24.04` —— harbor 的
    `ubuntu:24.04-…-chrome` 只发 amd64,arm64 必须自建 base。
 2. `docker/dsh/Dockerfile` → `dsh:dev` —— `pnpm install` + `pnpm run build`,最耗时。
-3. `docker/dsh-aio/Dockerfile` → `dsh-aio:dev-arm64`(+ `dev-arm64-<sha>`)。
+3. `docker/dsh-aio/Dockerfile.dev` → `dsh-aio:dev-arm64`(+ `dev-arm64-<sha>`)。
 
 基础镜像(`ubuntu:24.04`、`node:24`)走构建机 `daemon.json` 的镜像加速器,
 不直连 Docker Hub。`--push` 把所有层加基础镜像以 `-arm64` 后缀推 harbor,

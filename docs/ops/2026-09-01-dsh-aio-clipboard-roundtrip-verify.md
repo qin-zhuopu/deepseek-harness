@@ -26,7 +26,7 @@ docker build \
   --build-arg DSH_IMAGE=dsh:dev \
   --build-arg DSH_CLIENT_COMMIT_HASH=$(git rev-parse HEAD) \
   --build-arg DSH_BUILD_TS=$(date -u +%Y%m%dT%H%M%SZ) \
-  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile docker/dsh-aio
+  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile.dev docker/dsh-aio
 ```
 
 `xsel` (and `autocutsel`) are confirmed installed in the aio image's existing apt layer:
@@ -55,10 +55,10 @@ Two sandbox constraints shaped the procedure:
    # poll until 127.0.0.1:3080 and :6080 both answer 200 (dsh web tsx boot ~22s), then run the verifier
    ```
 
-3. **Playwright browser + module resolution.** The verifier `import`s `playwright`, whose package lives under `apps/web` (`/app/apps/web/node_modules/playwright`, plus `/app/node_modules/.pnpm/playwright@1.61.1/...`), not at `/app/node_modules/playwright`. Node ESM resolves a bare specifier from the importing module's directory, so running the script from `/app` fails with `ERR_MODULE_NOT_FOUND`. Fix used: copy the verifier into `/app/apps/web/` and run it there. Separately, the image does not bake Playwright's browser binary, so the canvas leg first failed with `Executable doesn't exist at .../chromium_headless_shell-1228`; installing it inside the container (network is open) resolved it:
+3. **Playwright browser + module resolution.** The verifier `import`s `playwright`, whose package lives under `apps/web` (`/workspaces/deepseek-harness/apps/web/node_modules/playwright`, plus `/workspaces/deepseek-harness/node_modules/.pnpm/playwright@1.61.1/...`), not at `/workspaces/deepseek-harness/node_modules/playwright`. Node ESM resolves a bare specifier from the importing module's directory, so running the script from `/workspaces/deepseek-harness` fails with `ERR_MODULE_NOT_FOUND`. Fix used: copy the verifier into `/workspaces/deepseek-harness/apps/web/` and run it there. Separately, the image does not bake Playwright's browser binary, so the canvas leg first failed with `Executable doesn't exist at .../chromium_headless_shell-1228`; installing it inside the container (network is open) resolved it:
 
    ```sh
-   docker exec dsh-aio bash -lc 'cd /app/apps/web && node node_modules/playwright/cli.js install chromium'
+   docker exec dsh-aio bash -lc 'cd /workspaces/deepseek-harness/apps/web && node node_modules/playwright/cli.js install chromium'
    # -> Chrome Headless Shell 149.0.7827.55 (playwright chromium-headless-shell v1228) downloaded
    ```
 
@@ -66,8 +66,8 @@ Two sandbox constraints shaped the procedure:
 
 ```sh
 docker exec dsh-aio bash -lc '
-  cp /app/docker/dsh-aio/verify-novnc-playwright.mjs /app/apps/web/verify-novnc-playwright.mjs
-  cd /app/apps/web && CONTAINER=__inproc__ \
+  cp /workspaces/deepseek-harness/docker/dsh-aio/verify-novnc-playwright.mjs /workspaces/deepseek-harness/apps/web/verify-novnc-playwright.mjs
+  cd /workspaces/deepseek-harness/apps/web && CONTAINER=__inproc__ \
     NOVNC_URL=http://127.0.0.1:6080 DSH_URL=http://127.0.0.1:3080 \
     node verify-novnc-playwright.mjs
 '
@@ -93,7 +93,7 @@ DSH_URL=http://127.0.0.1:3080  NOVNC_URL=http://127.0.0.1:6080  CONTAINER=__inpr
 [PASS] dsh web HTTP 200 — http://127.0.0.1:3080/ -> HTTP 200
 [PASS] noVNC vnc.html HTTP 200 — http://127.0.0.1:6080/vnc.html -> HTTP 200
 [PASS] autocutsel CLIPBOARD + PRIMARY running — both instances found
-[PASS] noVNC canvas painted — canvas 1280x720; screenshot -> /app/apps/web/logs/novnc-verify.png
+[PASS] noVNC canvas painted — canvas 1280x720; screenshot -> /workspaces/deepseek-harness/apps/web/logs/novnc-verify.png
 [PASS] clipboard round-trip (bidirectional, browser/RFB leg) — both directions proven across the RFB browser channel; proven-via: REMOTE->LOCAL=browser, LOCAL->REMOTE=browser; evidence:
        X CLIPBOARD set to "dsh-aio-remote-1788256334251"
        | [browser] noVNC #noVNC_clipboard_text observed "dsh-aio-remote-1788256334251"

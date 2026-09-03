@@ -31,7 +31,7 @@ native (no buildx/QEMU):
    `ubuntu:24.04-…-chrome` is amd64-only, so arm64 must build its own base.
 2. `docker/dsh/Dockerfile` → `dsh:dev` — `pnpm install` + `pnpm run build`, the
    slow step.
-3. `docker/dsh-aio/Dockerfile` → `dsh-aio:dev-arm64` (+ `dev-arm64-<sha>`).
+3. `docker/dsh-aio/Dockerfile.dev` → `dsh-aio:dev-arm64` (+ `dev-arm64-<sha>`).
 
 Base images (`ubuntu:24.04`, `node:24`) come through the builder's
 `daemon.json` mirror accelerators, never Docker Hub directly. `--push` sends

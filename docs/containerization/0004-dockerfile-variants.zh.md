@@ -20,7 +20,7 @@
 
 | 你的场景 | 用哪个 |
 |---|---|
-| 有公网,改 dsh 源码迭代 | `docker/dsh/Dockerfile` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile` |
+| 有公网,改 dsh 源码迭代 | `docker/dsh/Dockerfile` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile.dev` |
 | **arm64** 主机 | 同样用公网那套文件,外加 `docker/chrome-base/Dockerfile` 构建运行基底 —— 见[在 arm64 主机上](#在-arm64-主机上) |
 | 内网无公网的构建机,从源码构建 | `docker/dsh/Dockerfile.internal` → `dsh:dev`,再 `docker/dsh-aio/Dockerfile.internal` |
 | 生产,公网构建机,完整构建 | `docker/dsh-aio/Dockerfile.prod`(基于 `dsh:dev`) |
@@ -34,7 +34,7 @@
 |---|------|------|------|------|----------|-------------|
 | 1 | `docker/dsh/Dockerfile` | dsh | 公网 | dev | `node:24` | —(仅作 re-base 源) |
 | 2 | `docker/dsh/Dockerfile.internal` | dsh | 内网 | dev | `harbor…/node:24` | —(仅作 re-base 源) |
-| 3 | `docker/dsh-aio/Dockerfile` | aio | 公网 | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 3 | `docker/dsh-aio/Dockerfile.dev` | aio | 公网 | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
 | 4 | `docker/dsh-aio/Dockerfile.internal` | aio | 内网 | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
 | 5 | `docker/dsh-aio/Dockerfile.prod` | aio | 公网 | **生产** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
 | 6 | `docker/dsh-aio/Dockerfile.prod.internal` | aio | 内网 | **生产** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
@@ -155,7 +155,7 @@ docker build --build-arg NODE_IMAGE=$MIRROR/node:24 \
 
 docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
   --build-arg NODE_IMAGE=$MIRROR/node:24 \
-  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile docker/dsh-aio
+  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile.dev docker/dsh-aio
 ```
 
 应用本身不需要任何 arm64 适配:`pnpm install` 会从同一份 lockfile 解析出每个原生包的 arm64 可选依赖(esbuild、sharp、node-pty、`@vscode/ripgrep`、lightningcss、oxc-resolver、rolldown、oxlint)。这也正是构建不能接收宿主 `node_modules` 的原因 —— `.dockerignore` 已将其排除,因为拷进来的 amd64 目录树会让 `pnpm install` 去调和一堆加载不了的二进制。
@@ -177,7 +177,7 @@ docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
 | 变量 | 默认值 | 用途 |
 |------|--------|------|
 | `NR_API_KEY` | — | LLM 凭据;唯一必填项。 |
-| `DEV_WATCH` | `1` | 仅 dev 镜像:在 `dsh web` 旁运行 `pnpm dev:web --poll`,改 `/app` 下的 web 客户端源码即热更新页面(`dsh web` 轮询所服务的 bundle 并广播 `rebuilt`)。`0` 则只服务镜像内已构建的产物。host 面(服务端)源码改动仍需重启容器。 |
+| `DEV_WATCH` | `1` | 仅 dev 镜像:在 `dsh web` 旁运行 `pnpm dev:web --poll`,改 `/workspaces/deepseek-harness` 下的 web 客户端源码即热更新页面(`dsh web` 轮询所服务的 bundle 并广播 `rebuilt`)。`0` 则只服务镜像内已构建的产物。host 面(服务端)源码改动仍需重启容器。 |
 | `SCREEN_GEOMETRY` | `576x1440x24` | 初始桌面尺寸(之后 sidecar 会把它跟视口对齐)。 |
 | `BIND_ADDR` | `127.0.0.1` | websockify 与 CDP 的监听地址。**移不动 dsh web** —— 它拒绝任何非回环绑定（见下），那种场景请用 `FRONT_PORT`。 |
 | `FRONT_PORT` | — | 启用 `front-proxy.js`：一个可路由端口按路径分发到三个 loopback 服务。走反向代理时必须设置。留空 = 关闭。 |

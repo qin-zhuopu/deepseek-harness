@@ -31,13 +31,14 @@ ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
 RUN npm config set registry ${NPM_REGISTRY}
 
 # ── app ──
-WORKDIR /app
+WORKDIR /workspaces/deepseek-harness
 
 # CI=true makes scripts/install-lefthook.mjs a no-op for the whole build. With
-# .git now in the context the hook installer would fail on /app/.git/dsh-hooks;
-# git hooks are a developer-local concern the image never needs. Set as ENV (not
-# a per-RUN prefix) because `pnpm run build` re-triggers install via its deps
-# check, which must also see CI=true.
+# .git now in the context the hook installer would fail on
+# /workspaces/deepseek-harness/.git/dsh-hooks; git hooks are a developer-local
+# concern the image never needs. Set as ENV (not a per-RUN prefix) because
+# `pnpm run build` re-triggers install via its deps check, which must also see
+# CI=true.
 ENV CI=true
 
 COPY . .

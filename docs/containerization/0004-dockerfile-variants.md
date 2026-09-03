@@ -23,7 +23,7 @@ A ninth file, `docker/chrome-base/Dockerfile`, is not a variant of either image:
 
 | Your situation | Use |
 |---|---|
-| Public egress, iterating on dsh source | `docker/dsh/Dockerfile` → `dsh:dev`, then `docker/dsh-aio/Dockerfile` |
+| Public egress, iterating on dsh source | `docker/dsh/Dockerfile` → `dsh:dev`, then `docker/dsh-aio/Dockerfile.dev` |
 | An **arm64** host | the same public files, plus `docker/chrome-base/Dockerfile` for the runtime base — see [On arm64 hosts](#on-arm64-hosts) |
 | Air-gapped build host, building from source | `docker/dsh/Dockerfile.internal` → `dsh:dev`, then `docker/dsh-aio/Dockerfile.internal` |
 | Production, public build host, full build | `docker/dsh-aio/Dockerfile.prod` (on top of `dsh:dev`) |
@@ -37,7 +37,7 @@ A ninth file, `docker/chrome-base/Dockerfile`, is not a variant of either image:
 |---|------|-------|---------|------|------------|--------|
 | 1 | `docker/dsh/Dockerfile` | dsh | public | dev | `node:24` | — (rebase source only) |
 | 2 | `docker/dsh/Dockerfile.internal` | dsh | internal | dev | `harbor…/node:24` | — (rebase source only) |
-| 3 | `docker/dsh-aio/Dockerfile` | aio | public | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
+| 3 | `docker/dsh-aio/Dockerfile.dev` | aio | public | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
 | 4 | `docker/dsh-aio/Dockerfile.internal` | aio | internal | dev | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:dev` |
 | 5 | `docker/dsh-aio/Dockerfile.prod` | aio | public | **prod** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
 | 6 | `docker/dsh-aio/Dockerfile.prod.internal` | aio | internal | **prod** | `dsh:dev` | `harbor.jereh.cn/base/dsh-aio:prod` |
@@ -182,7 +182,7 @@ docker build --build-arg NODE_IMAGE=$MIRROR/node:24 \
 
 docker build --build-arg CHROME_BASE_IMAGE=dsh-chrome-base:24.04 \
   --build-arg NODE_IMAGE=$MIRROR/node:24 \
-  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile docker/dsh-aio
+  -t dsh-aio:dev -f docker/dsh-aio/Dockerfile.dev docker/dsh-aio
 ```
 
 Nothing in the application needs an arm64 port: `pnpm install` resolves the arm64 optional dependency of every native package (esbuild, sharp, node-pty, `@vscode/ripgrep`, lightningcss, oxc-resolver, rolldown, oxlint) from the same lockfile. This is why the build must not receive a host `node_modules` — `.dockerignore` excludes it, because a copied amd64 tree leaves `pnpm install` reconciling unloadable binaries.
@@ -204,7 +204,7 @@ The one behavioral difference is the [Landlock launcher](../../native/landlock-r
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `NR_API_KEY` | — | LLM credential; the only required one. |
-| `DEV_WATCH` | `1` | Dev image only: runs `pnpm dev:web --poll` alongside `dsh web`, so edits to the web client source under `/app` hot-reload the served page (`dsh web` stat-polls the bundles and broadcasts `rebuilt`). `0` serves the baked bundles. Host-face (server) edits still need a container restart. |
+| `DEV_WATCH` | `1` | Dev image only: runs `pnpm dev:web --poll` alongside `dsh web`, so edits to the web client source under `/workspaces/deepseek-harness` hot-reload the served page (`dsh web` stat-polls the bundles and broadcasts `rebuilt`). `0` serves the baked bundles. Host-face (server) edits still need a container restart. |
 | `SCREEN_GEOMETRY` | `576x1440x24` | Initial desktop size (the sidecar resizes it to the viewport afterwards). |
 | `BIND_ADDR` | `127.0.0.1` | Listen address for websockify and CDP. **Does not move dsh web**, which refuses any non-loopback bind (see below); use `FRONT_PORT` for that. |
 | `FRONT_PORT` | — | Enables `front-proxy.js`: one routable port that fans out to all three loopback services. Required behind a reverse proxy. Empty = off. |

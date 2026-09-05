@@ -92,7 +92,7 @@ docker run -d --name ide-14409 \
   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize \
   -e TRUSTED_HOSTS=ide-14409.jereh-pe.cn \
   -e VIRTUAL_HOST=ide-14409.jereh-pe.cn -e VIRTUAL_PORT=8080 \
-  -e HTTPS_METHOD=noredirect \
+  -e HTTPS_METHOD=noredirect -e DSH_IAM_GATE=1 \
   --entrypoint bash \
   harbor.jereh.cn/base/dsh-aio:dev-amd64 -c 'sleep 60000'
 rm -f /run/ide-14409.env
@@ -114,8 +114,8 @@ docker exec -d ide-14409 /usr/local/bin/entrypoint.sh >>/dev/null 2>&1
 
 `probe` 在宿主机上执行,两级都通过之后 Portal 才允许把 URL 交出去:
 
-1. **内网级**:用 `docker inspect` 取容器 IP,`curl -fsS http://<ip>:8080/` → `200`。证明 entrypoint 真的跑起来了(能抓住 C2 的冻结),且 front-proxy 已就绪。
-2. **经代理级**:在宿主机上 `curl -fsS -H 'Host: ide-<uid>.jereh-pe.cn' http://127.0.0.1/` → `200`。证明 docker-gen 已经装好规则,浏览器不会撞上默认 vhost;这一级同时吸收 nginx 重载延迟。
+1. **内网级**:用 `docker inspect` 取容器 IP,`curl` 一下 `http://<ip>:8080/`,接受 `200`、`302`、`401`。证明 entrypoint 真的跑起来了(能抓住 C2 的冻结),且 front-proxy 已就绪。容器侧闸门(见下文)对探测的未认证 GET 回答 `302`/`401`,所以裸 `200` 不是唯一的健康应答。
+2. **经代理级**:在宿主机上 `curl -H 'Host: ide-<uid>.jereh-pe.cn' http://127.0.0.1/`,接受码相同。证明 docker-gen 已经装好规则,浏览器不会撞上默认 vhost;这一级同时吸收 nginx 重载延迟。
 
 两级都打向钉死的 8080 front-proxy 端口(C1)。预算:30 秒一次,上限 10 分钟(C7);每次尝试都发一条带已耗时的事件(FR5、N1)。
 
@@ -125,7 +125,7 @@ SSE 事件负载是只追加的 JSON 对象:
 
 ```json
 {"type":"state","state":"STARTING","ideUrl":"http://ide-14409.jereh-pe.cn/"}
-{"type":"step","seq":7,"step":"probe-proxy","status":"ok","detail":"200 after 4 tries, 210s"}
+{"type":"step","seq":7,"step":"probe-proxy","status":"ok","detail":"HTTP 302 after 4 tries, 210s"}
 {"type":"step","seq":8,"step":"ready","status":"ok","detail":"build #12 SUCCESS"}
 ```
 
@@ -133,9 +133,9 @@ SSE 事件负载是只追加的 JSON 对象:
 
 收到 `ready` 时浏览器用 `location.href` 跳转;页面同时常驻一个"进入我的 IDE"按钮,作为无 JS/弹窗被拦截时的兜底。热路径根本不打开 SSE 流——它就是一条裸 `302`(FR3)。
 
-## 容器侧登录(建议,对应 O2)
+## 容器侧登录(O2)
 
-用户 vhost 可被枚举(uid 即工号),且代理仅 HTTP(C4);0005 自己那句警告——能碰到代理就等于碰到 dsh 控制平面——现在要按每个用户来算。建议:在每个用户容器内挂同一个随附闸门([`dsh-host-auth-iam`](../../packages/host/auth-iam/README.zh.md)),`clientId: EnterpriseDingtalk`;闸门按请求来源拼自己的 `redirect_uri`,容器 `ide-<uid>` 的登录回调就是 `http://ide-<uid>.jereh-pe.cn/auth/callback`,IAM 接受这个未登记的回调(C10)——挂闸门就是镜像里一行 cordis.yml 加 IAM client 配置,零逐用户协调。Portal 跳转过去时浏览器仍持有 IAM 的 `usk` 会话,于是第二次登录只是一次静默 fragment 往返;随后已验签 token 落为该容器自己的、按主机名收窄的 cookie。闸门自身的 cookie 模型就是会存 `id_token`(SR4):用户的 token 只存在于用户自己的容器里,别无他处。在 O2 落地之前,把每个用户 vhost 都当作一台开放的内部测试机看待。
+用户 vhost 可被枚举(uid 即工号),且代理仅 HTTP(C4);0005 自己那句警告——能碰到代理就等于碰到 dsh 控制平面——现在要按每个用户来算。做法:在每个用户容器内挂同一个随附闸门([`dsh-host-auth-iam`](../../packages/host/auth-iam/README.zh.md)),`clientId: EnterpriseDingtalk`;闸门按请求来源拼自己的 `redirect_uri`,容器 `ide-<uid>` 的登录回调就是 `http://ide-<uid>.jereh-pe.cn/auth/callback`,IAM 接受这个未登记的回调(C10)。overlay 随镜像烘在 `/root/.dsh/iam-gate.cordis.patch.yml`,由 `DSH_IAM_GATE=1`(开通脚本固定注入)经 entrypoint 的 `--patch` 层挂上;不设这个开关的容器保持开放,不受影响。Portal 跳转过去时浏览器仍持有 IAM 的 `usk` 会话,于是第二次登录只是一次静默 fragment 往返;随后已验签 token 落为该容器自己的、按主机名收窄的 cookie。闸门自身的 cookie 模型就是会存 `id_token`(SR4):用户的 token 只存在于用户自己的容器里,别无他处。
 
 ## 配置
 
@@ -169,9 +169,9 @@ token 不携带 group 或 email claim(0007"身份 claim"),所以这里刻意没�
 ## 落地与验证
 
 1. 手工部署 Portal 容器;验证 OIDC 往返,并对现有 `dsh.jereh-pe.cn` 服务形态跑一次 `probe`。
-2. 以 uid 14409 做冷路径自用:预期首个 200 至少 45 秒(C7),marker 实时成流,跳转落在一个可用的 IDE 上。
+2. 以 uid 14409 做冷路径自用:预期首个健康应答至少 45 秒(C7),marker 实时成流,跳转在闸门那次静默 IAM 往返之后落在一个可用的 IDE 上。
 3. 扰动验证:`docker stop ide-14409` → 再进入应经 STARTING 恢复(US3);创建时故意不发 hook 以复现 PID1 冻结 → probe-internal 能抓住(FR6);同时开两个标签页 → 只有一个 build(US4)。
-4. 只有在 10.1.17.58 上第 1–3 步都通过后,再凭真实使用数据回头评估已搁置项(O2 登录、O4 闲置回收、O5 TLS、O7 封顶)。
+4. 只有在 10.1.17.58 上第 1–3 步都通过后,再凭真实使用数据回头评估已搁置项(O4 闲置回收、O5 TLS、O7 封顶)。
 
 ## 相关
 

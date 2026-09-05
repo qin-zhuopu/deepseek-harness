@@ -92,7 +92,7 @@ docker run -d --name ide-14409 \
   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize \
   -e TRUSTED_HOSTS=ide-14409.jereh-pe.cn \
   -e VIRTUAL_HOST=ide-14409.jereh-pe.cn -e VIRTUAL_PORT=8080 \
-  -e HTTPS_METHOD=noredirect \
+  -e HTTPS_METHOD=noredirect -e DSH_IAM_GATE=1 \
   --entrypoint bash \
   harbor.jereh.cn/base/dsh-aio:dev-amd64 -c 'sleep 60000'
 rm -f /run/ide-14409.env
@@ -114,8 +114,8 @@ Volumes carry all user data (FR9): `-workspace` roots `INIT_WORKSPACE`, `-dshome
 
 `probe` runs on the host and must pass both levels before the portal may hand out the URL:
 
-1. **Internal**: resolve the container IP with `docker inspect` and `curl -fsS http://<ip>:8080/` → `200`. Proves the entrypoint actually ran (catches C2's freeze) and front-proxy is up.
-2. **Via proxy**: `curl -fsS -H 'Host: ide-<uid>.jereh-pe.cn' http://127.0.0.1/` on the host → `200`. Proves docker-gen already installed the rule, so the browser will not meet a default vhost; this probe absorbs the reload delay.
+1. **Internal**: resolve the container IP with `docker inspect` and `curl` `http://<ip>:8080/`, accepting `200`, `302`, or `401`. Proves the entrypoint actually ran (catches C2's freeze) and front-proxy is up. The container-side gate answers `302`/`401` to the probe's unauthenticated GET, so a bare `200` is not the only live answer.
+2. **Via proxy**: `curl -H 'Host: ide-<uid>.jereh-pe.cn' http://127.0.0.1/` on the host, same accepted codes. Proves docker-gen already installed the rule, so the browser will not meet a default vhost; this probe absorbs the reload delay.
 
 Both use the pinned 8080 front-proxy port (C1). Budget: 30 s interval, 10-minute cap (C7); each attempt emits a step event with the elapsed time (FR5, N1).
 
@@ -125,7 +125,7 @@ SSE event payloads are append-only JSON objects:
 
 ```json
 {"type":"state","state":"STARTING","ideUrl":"http://ide-14409.jereh-pe.cn/"}
-{"type":"step","seq":7,"step":"probe-proxy","status":"ok","detail":"200 after 4 tries, 210s"}
+{"type":"step","seq":7,"step":"probe-proxy","status":"ok","detail":"HTTP 302 after 4 tries, 210s"}
 {"type":"step","seq":8,"step":"ready","status":"ok","detail":"build #12 SUCCESS"}
 ```
 
@@ -133,9 +133,9 @@ Steps: `reconcile`, `lock`, `jenkins-queued`, `jenkins-running`, `image-pull`, `
 
 When `ready` arrives the browser navigates via `location.href`; the page also shows a persistent "Open my IDE" button as the no-JS/popup-blocked fallback. The warm path never opens the SSE stream at all — it is the bare `302` (FR3).
 
-## Container-side login (recommended, O2)
+## Container-side login (O2)
 
-User vhosts are guessable (uid = employee number) and the proxy is HTTP-only (C4); 0005's own warning — reaching the proxy means reaching a dsh control plane — applies per user. Recommended: mount the same shipped gate ([`dsh-host-auth-iam`](../../packages/host/auth-iam/README.md)) inside each user container with `clientId: EnterpriseDingtalk`; the gate builds its `redirect_uri` from the request origin, so container `ide-<uid>` signs in at `http://ide-<uid>.jereh-pe.cn/auth/callback`, and the IAM accepts that unregistered callback (C10) — provisioning the gate is a cordis.yml row plus the IAM client config baked into the image, zero per-user coordination. After the portal's redirect the browser still holds the IAM `usk` session, so the second login is a silent fragment round-trip; the verified token then lands as that container's own host-scoped cookie. The gate's own cookie model is what stores the `id_token` (SR4): the user's token lives in the user's container, nowhere else. Until O2 lands, treat every user vhost as an open internal test box.
+User vhosts are guessable (uid = employee number) and the proxy is HTTP-only (C4); 0005's own warning — reaching the proxy means reaching a dsh control plane — applies per user. The fix: mount the same shipped gate ([`dsh-host-auth-iam`](../../packages/host/auth-iam/README.md)) inside each user container with `clientId: EnterpriseDingtalk`; the gate builds its `redirect_uri` from the request origin, so container `ide-<uid>` signs in at `http://ide-<uid>.jereh-pe.cn/auth/callback`, and the IAM accepts that unregistered callback (C10). The overlay ships baked in the image at `/root/.dsh/iam-gate.cordis.patch.yml` and mounts through the entrypoint's `--patch` layer when `DSH_IAM_GATE=1` (always set by the provisioning script); containers launched without the switch stay open and unaffected. After the portal's redirect the browser still holds the IAM `usk` session, so the second login is a silent fragment round-trip; the verified token then lands as that container's own host-scoped cookie. The gate's own cookie model is what stores the `id_token` (SR4): the user's token lives in the user's container, nowhere else.
 
 ## Configuration
 
@@ -169,9 +169,9 @@ The token carries no group or email claim (0007, Identity claims), so there is d
 ## Rollout and verification
 
 1. Deploy the portal container by hand; verify the OIDC round-trip and a `probe` against the existing `dsh.jereh-pe.cn` service shape.
-2. Cold-path dogfood as uid 14409: expect ≥45 s to first 200 (C7), markers streaming live, redirect landing on a working IDE.
+2. Cold-path dogfood as uid 14409: expect ≥45 s to first health answer (C7), markers streaming live, redirect landing on a working IDE after the gate's silent IAM round-trip.
 3. Chaos passes: `docker stop ide-14409` → re-enter recovers via STARTING (US3); freeze the PID1 by re-creating without the hook → probe-internal catches it (FR6); two tabs at once → one build (US4).
-4. Only after 1–3 pass on 10.1.17.58 revisit the parked items (O2 login, O4 reclamation, O5 TLS, O7 caps) with real usage data.
+4. Only after 1–3 pass on 10.1.17.58 revisit the parked items (O4 reclamation, O5 TLS, O7 caps) with real usage data.
 
 ## Related
 

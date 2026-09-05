@@ -119,8 +119,8 @@ sequenceDiagram
     J->>H: docker exec -d ide-<uid> /usr/local/bin/entrypoint.sh
     H->>C: entrypoint boots Xvnc / Chrome / front-proxy / dsh web
     N->>C: docker-gen picks up VIRTUAL_HOST (seconds, no file edit)
-    J->>C: probe 1: internal http://ide-<uid>:8080/ -> 200
-    J->>N: probe 2: proxy GET with Host ide-<uid>.jereh-pe.cn -> 200
+    J->>C: probe 1: internal http://ide-<uid>:8080/ -> 200/302/401 (gate)
+    J->>N: probe 2: proxy GET with Host ide-<uid>.jereh-pe.cn -> 200/302/401
     P-->>B: READY event with the IDE url
     B->>C: browser navigates (warm path: the plain 302)
 ```

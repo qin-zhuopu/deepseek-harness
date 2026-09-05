@@ -61,6 +61,9 @@ const appPackageFiles: Readonly<Record<string, readonly string[]>> = {
   // The Web build emits sourcemaps for browser debugging; publishing them is
   // what the payload policy forbids, so the bundle ships without them.
   '@deepseek-ai/dsh-web-frontend': ['dist', '!dist/**/*.map'],
+  // The portal is launched from its checkout; the published payload is its
+  // type surface plus the static start-page assets.
+  '@deepseek-ai/dsh-ide-portal': ['lib/types', 'web'],
 }
 
 /** The subset of package.json fields this constraint check cares about. */

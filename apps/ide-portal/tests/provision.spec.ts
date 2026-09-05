@@ -9,7 +9,7 @@
  */
 
 import { execFile } from 'node:child_process'
-import { chmod, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -46,7 +46,7 @@ function runScript(dir: string, stdin: string, args: string[]): Promise<Run> {
       },
       (error, stdout, stderr) => {
         void error // exit status is the assertion, delivered through `code`
-        resolvePromise({ code: typeof error?.code === 'number' ? error.code : 1, stdout, stderr })
+        resolvePromise({ code: error === null ? 0 : typeof error.code === 'number' ? error.code : 1, stdout, stderr })
       },
     ).stdin?.end(stdin)
   })
@@ -79,9 +79,7 @@ afterAll(async () => {
 
 /** Reset the fake model: container state, image presence, HTTP answer. */
 async function seed(options: { container?: string; image?: boolean; http?: string }): Promise<void> {
-  for (const entry of await import('node:fs/promises').then(fs => fs.readdir(dir))) {
-    await rm(join(dir, entry), { force: true })
-  }
+  for (const entry of await readdir(dir)) await rm(join(dir, entry), { force: true })
   if (options.container !== undefined) await writeFile(join(dir, 'ide-14409.state'), options.container)
   if (options.image === true) await writeFile(join(dir, 'image.state'), '')
   if (options.http !== undefined) await writeFile(join(dir, 'http.code'), options.http)

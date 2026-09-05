@@ -626,6 +626,15 @@
         "react-dom"
       ]
     },
+    "apps/ide-portal": {
+      "entry": [
+        "tests/**/*.spec.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/**/*.ts"
+      ]
+    },
     "apps/cli": {
       "entry": [
         "tests/**/*.spec.ts",

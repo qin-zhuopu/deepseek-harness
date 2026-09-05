@@ -10,7 +10,9 @@
 set -euo pipefail
 cmd="${1:-}"; shift || true
 name=""
-for arg in "$@"; do [[ "$arg" =~ ^ide-[0-9]+$ ]] && name="$arg"; done
+for arg in "$@"; do
+  if [[ "$arg" =~ ^ide-[0-9]+$ ]]; then name="$arg"; fi
+done
 state_file="${FAKE_DOCKER_DIR}/${name}.state"
 
 case "$cmd" in

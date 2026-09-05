@@ -190,18 +190,19 @@ log "CDP ready: $(curl -s http://${BIND_ADDR}:${CDP_PORT}/json/version | head -c
 if [ -n "${INIT_WORKSPACE}" ]; then
   (
     mkdir -p "${INIT_WORKSPACE}"
+    # `/` answers before the RPC gateway finishes mounting, so retry the POST
+    # itself; workspace.create is idempotent, so every attempt is safe.
     for i in $(seq 1 60); do
-      curl -sf -o /dev/null "http://${BIND_ADDR}:${DSH_PORT}/" && break
+      UUID=$(cat /proc/sys/kernel/random/uuid)
+      body="{\"type\":\"client-request\",\"rpcId\":\"${UUID}\",\"method\":\"workspace.create\",\"payload\":{\"path\":\"${INIT_WORKSPACE}\"}}"
+      if curl -sf -X POST "http://${BIND_ADDR}:${DSH_PORT}/api/workspace.create" \
+           -H 'content-type: application/json' -d "${body}" >/dev/null 2>&1; then
+        log "workspace registered: ${INIT_WORKSPACE}"
+        break
+      fi
+      [ "$i" = 60 ] && log "workspace registration for ${INIT_WORKSPACE} failed (non-fatal)"
       sleep 1
     done
-    UUID=$(cat /proc/sys/kernel/random/uuid)
-    body="{\"type\":\"client-request\",\"rpcId\":\"${UUID}\",\"method\":\"workspace.create\",\"payload\":{\"path\":\"${INIT_WORKSPACE}\"}}"
-    if curl -sf -X POST "http://${BIND_ADDR}:${DSH_PORT}/api/workspace.create" \
-         -H 'content-type: application/json' -d "${body}" >/dev/null 2>&1; then
-      log "workspace registered: ${INIT_WORKSPACE}"
-    else
-      log "workspace registration for ${INIT_WORKSPACE} failed (non-fatal)"
-    fi
   ) &
 fi
 

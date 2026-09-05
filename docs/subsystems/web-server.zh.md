@@ -26,6 +26,49 @@ interface WebRoute {
 
 匹配顺序固定：先查 exact 表，再取最长匹配前缀，最后落到已注册的回退。注册顺序不携带任何面向请求的语义：具名路由在组合上互不相交，任何未被具名路由认领的请求都由回退席位应答；席位只有一个所有者，第二次注册会抛出异常。发布的 Web 组合用 [`dsh-host-frontend-static`](../../packages/host/frontend-static/src/index.ts) 认领席位，即遵循固定语义的 SPA dist 服务器：非 GET/HEAD 返回 405，越出 dist 根目录的遍历返回 403，可读的 index 在 dist 根目录和配置的 index 路径渲染，现有文件直接提供，缺失或不是文件的目标返回空的 404，未知扩展名按 octet-stream 发送。
 
+## 闸门
+
+```ts type-equiv
+/** Which surface of the request pipeline a {@link WebGuard} verdict covers: a matched named route, or the fallback seat. */
+type WebGuardSurface = 'route' | 'fallback'
+```
+
+```ts type-equiv
+/**
+ * Gate consulted ahead of every named route and of the fallback handler
+ * (never the bare 404 for an unclaimed fallback), in registration order.
+ * The first rejection stops the chain and its response is the guard's to
+ * own: an unwritten denial gets an empty 401. Guards carry no harness
+ * concepts; an auth plugin uses the surface to gate routes hard while
+ * handling the static shell (redirecting or passing it through) so a login
+ * page stays reachable.
+ */
+type WebGuard = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  surface: WebGuardSurface,
+) => boolean | Promise<boolean>
+```
+
+```ts type-equiv
+/** Allow (`true`) or reject (status plus optional response headers) one upgrade. */
+type UpgradeGuardVerdict = true | { status: number; headers?: Record<string, string> }
+```
+
+```ts type-equiv
+/**
+ * Gate consulted before any registered upgrade route runs — the auth seam
+ * for WebSocket traffic, which has no response object to write. Guards are
+ * consulted before the route table lookup, so a rejected connection never
+ * reveals whether the pathname has an owner. A rejecting verdict carries the
+ * rejection's status and optional headers; the carrier writes the rejection
+ * response on the pending upgrade and destroys the socket.
+ */
+type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>
+```
+
+闸门是可叠加的：每个请求都会按注册顺序依次咨询所有已注册的 `WebGuard`，每次 upgrade 都会按注册顺序依次咨询所有已注册的 `UpgradeGuard`，直到第一个拒绝出现。随附的闸门持有者是 [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts)：它的 fiber 激活时，任何路由、回退响应或 upgrade 之前都要求 bearer token 或认证 cookie；没有任何闸门注册时服务器保持开放。
+
 ## 配置
 
 ```ts type-equiv
@@ -38,7 +81,7 @@ interface Config {
 }
 ```
 
-`host` 只接受 `127.0.0.1`（默认姿态）和 `0.0.0.0`（刻意的网络暴露）；没有 TLS、认证或 origin 策略，因此绑定到非回环地址会把服务器暴露给该网络。dist 位置是认领席位的前端插件的组装事实。
+`host` 只接受 `127.0.0.1`（默认姿态）和 `0.0.0.0`（刻意的网络暴露）；没有 TLS 或 origin 策略，因此绑定到非回环地址会把服务器暴露给该网络，认证则是可自选的闸门持有者（见下文「闸门」）。dist 位置是认领席位的前端插件的组装事实。
 
 ## 服务
 
@@ -86,6 +129,28 @@ registerUpgrade(route: WebUpgradeRoute): () => void
  * @returns the disposer releasing the seat.
  */
 registerFallback(handler: WebRoute['handler']): () => void
+
+/**
+ * Register an HTTP guard: a gate consulted (in registration order) before
+ * every named route and before the fallback handler, told which surface
+ * the request took. The first rejection stops the chain and owns its
+ * response; an unwritten denial gets an empty 401. A request matching no
+ * route while the fallback seat is unclaimed is the bare 404 and sees no
+ * guard.
+ * @param guard - allow/deny decision, surfaced as 'route' or 'fallback'.
+ * @returns the disposer removing the guard.
+ */
+registerGuard(guard: WebGuard): () => void
+
+/**
+ * Register an upgrade guard: a pre-protocol gate consulted (ahead of the
+ * upgrade route table, in registration order) for every HTTP upgrade. A
+ * rejecting verdict answers the pending upgrade itself and the carrier
+ * destroys the socket.
+ * @param guard - allow/deny decision with the rejection's status/headers.
+ * @returns the disposer removing the guard.
+ */
+registerUpgradeGuard(guard: UpgradeGuard): () => void
 
 /**
  * Register a raw-HTML index transform, the escape hatch for markup no

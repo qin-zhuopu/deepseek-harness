@@ -393,6 +393,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [{ name: 'message', description: 'Client response carrying the server request\'s rpcId.' }],
         returns: 'Transport receipt for the response delivery.',
       },
+      {
+        signature: 'initWorkspaceRoot(signal?: AbortSignal): Promise<() => void>',
+        description: 'Prepare the fixed workspace root and mirror its child directories into the registry, then watch it for live changes. Not a domain method; the gateway plugin drives it once at startup.',
+        parameters: [{ name: 'signal', description: 'abort that also stops the watcher.' }],
+        returns: 'disposer that stops the watcher and unwinds preparation.',
+      },
     ],
   },
   {
@@ -2274,6 +2280,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the disposer releasing the seat.',
       },
       {
+        signature: 'registerGuard(guard: WebGuard): () => void',
+        description: 'Register an HTTP guard: a gate consulted (in registration order) before every named route and before the fallback handler, told which surface the request took. The first rejection stops the chain and owns its response; an unwritten denial gets an empty 401. A request matching no route while the fallback seat is unclaimed is the bare 404 and sees no guard.',
+        parameters: [{ name: 'guard', description: 'allow/deny decision, surfaced as \'route\' or \'fallback\'.' }],
+        returns: 'the disposer removing the guard.',
+      },
+      {
+        signature: 'registerUpgradeGuard(guard: UpgradeGuard): () => void',
+        description: 'Register an upgrade guard: a pre-protocol gate consulted (ahead of the upgrade route table, in registration order) for every HTTP upgrade. A rejecting verdict answers the pending upgrade itself and the carrier destroys the socket.',
+        parameters: [{ name: 'guard', description: 'allow/deny decision with the rejection\'s status/headers.' }],
+        returns: 'the disposer removing the guard.',
+      },
+      {
         signature: 'tapIndex(transform: (html: string) => string): () => void',
         description: 'Register a raw-HTML index transform, the escape hatch for markup no IndexInjection row expresses: renderIndex applies taps in registration order after rendering the structured rows.',
         parameters: [{ name: 'transform', description: 'pure html-to-html function.' }],
@@ -3403,7 +3421,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'GenerateOptions',
-    declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\';\n}',
+    declaration: 'export interface GenerateOptions {\n    provider: string;\n    model: string;\n    reasoningEffort?: ReasoningEffortId;\n    messages: Message[];\n    system?: string;\n    tools?: ToolSchema[];\n    temperature?: number;\n    maxTokens?: number;\n    stop?: string[];\n    signal?: AbortSignal;\n    sessionId?: Branded<\'SessionId\'>;\n    purpose?: \'compaction\' | \'session-title\' | \'workspace-create-from-prompt\';\n}',
   },
   {
     name: 'GenericCallView',
@@ -3979,7 +3997,7 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   },
   {
     name: 'RpcErrorDetailsMap',
-    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n        existingPreset?: string;\n    };\n    \'agent-preset-not-found\': {\n        agentPreset: string;\n      /* …truncated — full shape in source */',
+    declaration: 'export interface RpcErrorDetailsMap {\n    \'bad-request\': {\n        issues: ZodIssue[];\n    };\n    \'cancelled\': {};\n    \'session-not-found\': {\n        sessionId: SessionId;\n    };\n    \'model-unavailable\': {\n        provider: string;\n        model: string;\n    };\n    \'session-conflict\': {\n        sessionId: SessionId;\n        requestedCwd: string;\n        existingCwd?: string;\n    };\n    \'invalid-time-zone\': {\n        value: string;\n    };\n    \'workspace-attach-failed\': {\n        sessionId: SessionId;\n        workspaceId: string;\n    };\n    \'workspace-not-found\': {\n        workspaceId: string;\n    };\n    \'workspace-invalid-path\': {\n        path: string;\n    };\n    \'workspace-prompt-unavailable\': {};\n    \'workspace-prompt-rejected\': {\n        prompt: string;\n    };\n    \'workspace-name-conflict\': {\n        name: string;\n    };\n    \'workspace-move-invalid\': {\n        workspaceId: string;\n        sessionId: SessionId;\n        beforeSessionId?: SessionId;\n    };\n    \'directory-unreadable\': {\n        path: string;\n    };\n    \'directory-exists\': {\n        path: string;\n    };\n    \'directory-create-failed\': {\n        path: string;\n    };\n    \'directory-picker-unavailable\': {\n        capability: string;\n    };\n    \'agent-preset-read-only\': {\n        agentPreset: string;\n        reason: string;\n    };\n    \'agent-preset-locked\': {\n        sessionId: SessionId;\n        agentPreset: string;\n    };\n    \'agent-preset-conflict\': {\n        sessionId: SessionId;\n        requestedPreset: string;\n /* …truncated — full shape in source */',
   },
   {
     name: 'RpcId',
@@ -4930,6 +4948,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface UpdateTeamTaskRequest {\n    readonly taskId: TeamTaskId;\n    readonly expectedRevision: number;\n    readonly action: TeamTaskAction;\n    readonly subject?: string;\n    readonly description?: string;\n    readonly blockedBy?: readonly TeamTaskId[];\n    readonly writeScopes?: readonly string[];\n    readonly owner?: string;\n}',
   },
   {
+    name: 'UpgradeGuard',
+    declaration: 'export type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>;',
+  },
+  {
+    name: 'UpgradeGuardVerdict',
+    declaration: 'export type UpgradeGuardVerdict = true | {\n    status: number;\n    headers?: Record<string, string>;\n};',
+  },
+  {
     name: 'UserMessage',
     declaration: 'export interface UserMessage extends Message {\n    readonly role: \'user\';\n}',
   },
@@ -4964,6 +4990,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WebFetchResultView',
     declaration: 'export interface WebFetchResultView {\n    card: \'web\';\n    kind: \'fetch\';\n    title?: string;\n    url: string;\n    statusCode: number;\n    truncated: boolean;\n}',
+  },
+  {
+    name: 'WebGuard',
+    declaration: 'export type WebGuard = (req: IncomingMessage, res: ServerResponse, surface: WebGuardSurface) => boolean | Promise<boolean>;',
+  },
+  {
+    name: 'WebGuardSurface',
+    declaration: 'export type WebGuardSurface = \'route\' | \'fallback\';',
   },
   {
     name: 'WebResultView',

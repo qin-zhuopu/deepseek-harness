@@ -26,6 +26,49 @@ interface WebRoute {
 
 Match order is fixed: exact table first, then longest matching prefix, then the registered fallback. Registration order carries no request-facing semantics — named routes are composed to be disjoint, and the fallback seat answers anything no named route claims; one owner only, a second registration throws. The shipped Web composition claims the seat with [`dsh-host-frontend-static`](../../packages/host/frontend-static/src/index.ts), the SPA dist server with locked semantics: non-GET/HEAD is 405, traversal outside the dist root is 403, a readable index renders at the dist root and configured index path, existing files are served directly, absent or non-file targets are empty 404 responses, and unknown extensions ship as octet-stream.
 
+## Guards
+
+```ts type-equiv
+/** Which surface of the request pipeline a {@link WebGuard} verdict covers: a matched named route, or the fallback seat. */
+type WebGuardSurface = 'route' | 'fallback'
+```
+
+```ts type-equiv
+/**
+ * Gate consulted ahead of every named route and of the fallback handler
+ * (never the bare 404 for an unclaimed fallback), in registration order.
+ * The first rejection stops the chain and its response is the guard's to
+ * own: an unwritten denial gets an empty 401. Guards carry no harness
+ * concepts; an auth plugin uses the surface to gate routes hard while
+ * handling the static shell (redirecting or passing it through) so a login
+ * page stays reachable.
+ */
+type WebGuard = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  surface: WebGuardSurface,
+) => boolean | Promise<boolean>
+```
+
+```ts type-equiv
+/** Allow (`true`) or reject (status plus optional response headers) one upgrade. */
+type UpgradeGuardVerdict = true | { status: number; headers?: Record<string, string> }
+```
+
+```ts type-equiv
+/**
+ * Gate consulted before any registered upgrade route runs — the auth seam
+ * for WebSocket traffic, which has no response object to write. Guards are
+ * consulted before the route table lookup, so a rejected connection never
+ * reveals whether the pathname has an owner. A rejecting verdict carries the
+ * rejection's status and optional headers; the carrier writes the rejection
+ * response on the pending upgrade and destroys the socket.
+ */
+type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>
+```
+
+Guards are additive: every registered `WebGuard` is consulted per request and every registered `UpgradeGuard` per upgrade, each in registration order, until the first rejection. The shipped gate owner is [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts), which requires a bearer token or auth cookie before any route, fallback response, or upgrade when its fiber is active; with no guard registered the server is open.
+
 ## Config
 
 ```ts type-equiv
@@ -38,7 +81,7 @@ interface Config {
 }
 ```
 
-`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure); there is no TLS, auth, or origin policy, so a non-loopback bind exposes the server to that network. The dist location is an assembly fact of the frontend plugin that claims the seat.
+`host` accepts only `127.0.0.1` (default posture) and `0.0.0.0` (deliberate network exposure); there is no TLS or origin policy, so a non-loopback bind exposes the server to that network, and authentication is an opt-in guard owner (see Guards below). The dist location is an assembly fact of the frontend plugin that claims the seat.
 
 ## The service
 
@@ -86,6 +129,28 @@ registerUpgrade(route: WebUpgradeRoute): () => void
  * @returns the disposer releasing the seat.
  */
 registerFallback(handler: WebRoute['handler']): () => void
+
+/**
+ * Register an HTTP guard: a gate consulted (in registration order) before
+ * every named route and before the fallback handler, told which surface
+ * the request took. The first rejection stops the chain and owns its
+ * response; an unwritten denial gets an empty 401. A request matching no
+ * route while the fallback seat is unclaimed is the bare 404 and sees no
+ * guard.
+ * @param guard - allow/deny decision, surfaced as 'route' or 'fallback'.
+ * @returns the disposer removing the guard.
+ */
+registerGuard(guard: WebGuard): () => void
+
+/**
+ * Register an upgrade guard: a pre-protocol gate consulted (ahead of the
+ * upgrade route table, in registration order) for every HTTP upgrade. A
+ * rejecting verdict answers the pending upgrade itself and the carrier
+ * destroys the socket.
+ * @param guard - allow/deny decision with the rejection's status/headers.
+ * @returns the disposer removing the guard.
+ */
+registerUpgradeGuard(guard: UpgradeGuard): () => void
 
 /**
  * Register a raw-HTML index transform, the escape hatch for markup no

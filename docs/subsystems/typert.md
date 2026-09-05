@@ -246,6 +246,15 @@ Root interface of the unified API. New client-request domain = one new file pair
  * @returns Transport receipt for the response delivery.
  */
 respond(message: ClientResponse): Promise<RpcReceipt>
+
+/**
+ * Prepare the fixed workspace root and mirror its child directories into the
+ * registry, then watch it for live changes. Not a domain method; the gateway
+ * plugin drives it once at startup.
+ * @param signal - abort that also stops the watcher.
+ * @returns disposer that stops the watcher and unwinds preparation.
+ */
+initWorkspaceRoot(signal?: AbortSignal): Promise<() => void>
 ```
 
 Source: [`packages/host/apiproxy/src/api/index.ts`](../../packages/host/apiproxy/src/api/index.ts)

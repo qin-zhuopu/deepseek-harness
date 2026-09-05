@@ -820,10 +820,43 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Fixed root directory that holds every workspace as a direct child. Set it
+   * to an absolute path this deployment can create and watch; a local dev host
+   * overrides the container default via the profile patch.
+   * @default '/workspaces'
+   */
+  workspaceRoot?: string
 }
 ```
 
 Source: [`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+
+<a id="deepseek-aidsh-host-auth-jwt"></a>
+
+## `@deepseek-ai/dsh-host-auth-jwt`
+
+Requires: `webServer`
+
+```ts config-catalog
+/** Plugin config: the shared secret and the login-surface knobs. */
+export interface Config {
+  /** HMAC-SHA256 secret; also the login password. Minimum 32 characters. */
+  secret: string
+  /** Cookie carrying the token for same-origin browser requests. Default: `dsh_token`. */
+  cookie?: string
+  /** Exact path of the built-in login page (GET form, POST credential). Default: `/login`. */
+  loginPath?: string
+  /** Exact path that clears the auth cookie. Default: `/logout`. */
+  logoutPath?: string
+  /** Token lifetime in seconds. Default: 86400 (24h). */
+  lifetimeSeconds?: number
+  /** Add `Secure` to the auth cookie; enable only behind TLS. Default: false. */
+  secureCookie?: boolean
+}
+```
+
+Source: [`packages/host/auth-jwt/src/index.ts:34`](../packages/host/auth-jwt/src/index.ts)
 
 <a id="deepseek-aidsh-host-directory-picker-browse"></a>
 
@@ -869,7 +902,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/host/webserver/src/index.ts:59`](../packages/host/webserver/src/index.ts)
+Source: [`packages/host/webserver/src/index.ts:90`](../packages/host/webserver/src/index.ts)
 
 <a id="deepseek-aidsh-invariants"></a>
 
@@ -3260,6 +3293,7 @@ These load from a `cordis.yml` entry with no `config:` block; they declare no co
 - `@deepseek-ai/dsh-client-ui-tool` ([`packages/client/ui-tool/src/index.ts`](../packages/client/ui-tool/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-trajectory` ([`packages/client/ui-trajectory/src/index.ts`](../packages/client/ui-trajectory/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-user-questions` ([`packages/client/ui-user-questions/src/index.ts`](../packages/client/ui-user-questions/src/index.ts))
+- `@deepseek-ai/dsh-client-ui-vnc-preview` ([`packages/extensions/ui-vnc-preview/src/index.ts`](../packages/extensions/ui-vnc-preview/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workflow-run` ([`packages/client/ui-workflow-run/src/index.ts`](../packages/client/ui-workflow-run/src/index.ts))
 - `@deepseek-ai/dsh-client-ui-workspace` ([`packages/client/ui-workspace/src/index.ts`](../packages/client/ui-workspace/src/index.ts))
 - `@deepseek-ai/dsh-command-compact` — requires `commands` · `compaction` ([`packages/compaction/command-compact/src/index.ts`](../packages/compaction/command-compact/src/index.ts))

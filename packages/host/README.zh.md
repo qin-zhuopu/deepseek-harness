@@ -9,6 +9,7 @@ dsh Web GUI 的宿主侧：所有客户端形态共享的 API 网关，以及承
 | [`apiproxy/`](apiproxy/README.zh.md) | 共享宿主 API 网关和协议约定 | `ctx.apiProxy` |
 | [`webserver/`](webserver/README.zh.md) | HTTP 路由载体 | `ctx.webServer` |
 | [`frontend-static/`](frontend-static/README.zh.md) | 占据 webserver 回退席位的 SPA dist 服务器 | 消费 `ctx.webServer` |
+| [`auth-jwt/`](auth-jwt/README.zh.md) | 覆盖 webserver 全部请求面的可选 JWT bearer 闸门 | 消费 `ctx.webServer` |
 | [`directory-picker/`](directory-picker/README.zh.md) | 工作区目录选择 seam | `ctx.directoryPicker` |
 | [`directory-picker-native/`](directory-picker-native/README.zh.md) | 原生目录选择器后端和浏览器交互 | 注册 `ctx.directoryPicker` |
 | [`directory-picker-browse/`](directory-picker-browse/README.zh.md) | 应用内目录浏览器后端和交互 | 注册 `ctx.directoryPicker` |

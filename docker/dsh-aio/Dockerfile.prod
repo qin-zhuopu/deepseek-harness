@@ -105,6 +105,8 @@ COPY --from=dshbuild /workspaces/deepseek-harness /workspaces/deepseek-harness
 # Pre-wired DSH_HOME: web profile, nr provider, default model, chrome MCP patch.
 # (no credentials, no sessions — NR_API_KEY comes from -e at runtime)
 COPY dshhome/.dsh /root/.dsh
+# Opt-in IAM gate overlay, added to the dsh web launch as --patch when DSH_IAM_GATE=1.
+COPY dshhome/iam-gate.cordis.patch.yml /root/.dsh/iam-gate.cordis.patch.yml
 
 # Supervisor that launches the whole stack from the COMPILED entry.
 COPY entrypoint.prod.sh /usr/local/bin/entrypoint.sh

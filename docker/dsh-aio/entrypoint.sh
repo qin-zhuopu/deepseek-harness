@@ -266,4 +266,13 @@ fi
 
 # Server-side (host face) edits still need a restart: tsx transpiles once at
 # boot. Restart the container (or `docker restart`) to pick those up.
-exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"
+# Opt-in enterprise IAM gate (0008 container-side login): DSH_IAM_GATE=1 mounts
+# the baked auth-iam overlay as a --patch layer, so dsh web demands a signed IAM
+# token before any route. Off by default: existing containers keep the open box.
+IAM_ARGS=()
+if [ "${DSH_IAM_GATE:-0}" = 1 ]; then
+  IAM_ARGS+=(--patch /root/.dsh/iam-gate.cordis.patch.yml)
+  log "IAM gate enabled (auth-iam patch overlay)"
+fi
+
+exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}"

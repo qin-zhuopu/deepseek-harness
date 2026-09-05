@@ -244,4 +244,13 @@ fi
 # PRODUCTION: run the compiled entry, not the tsx source dispatch.
 log "dsh web on ${BIND_ADDR}:${DSH_PORT} (compiled entry)"
 cd /workspaces/deepseek-harness
-exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"
+# Opt-in enterprise IAM gate (0008 container-side login): DSH_IAM_GATE=1 mounts
+# the baked auth-iam overlay as a --patch layer, so dsh web demands a signed IAM
+# token before any route. Off by default: existing containers keep the open box.
+IAM_ARGS=()
+if [ "${DSH_IAM_GATE:-0}" = 1 ]; then
+  IAM_ARGS+=(--patch /root/.dsh/iam-gate.cordis.patch.yml)
+  log "IAM gate enabled (auth-iam patch overlay)"
+fi
+
+exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}"

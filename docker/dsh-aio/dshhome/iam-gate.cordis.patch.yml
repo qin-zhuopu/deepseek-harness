@@ -1,0 +1,13 @@
+# Opt-in enterprise IAM gate for dsh web (enabled by entrypoint.sh when
+# DSH_IAM_GATE=1, per 0008's container-side login). The gate builds its
+# redirect_uri from the request origin, so each user vhost — ide-<uid>.
+# jereh-pe.cn — signs in on its own domain and keeps the verified id_token as
+# its own host-scoped cookie; the IAM accepts these unregistered callbacks.
+# issuer/clientId default to the production IAM and accept IAM_ISSUER /
+# IAM_CLIENT_ID overrides.
+- insert:
+    - id: auth-iam
+      name: '@deepseek-ai/dsh-host-auth-iam'
+      config:
+        issuer: !!js 'process.env.IAM_ISSUER || "https://iam.jereh.cn/idp"'
+        clientId: !!js 'process.env.IAM_CLIENT_ID || "EnterpriseDingtalk"'

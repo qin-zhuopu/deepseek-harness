@@ -49,6 +49,10 @@
 
 流水线现在以 `Jenkinsfile` 的形态住在仓库根目录，job `dsh-aio-dev-build` 配置为 **Pipeline script from SCM**（Bitbucket `AI/deepseek-harness`、分支 `master`、凭据 `bitbucket`、脚本路径 `Jenkinsfile`）。改流水线就是一次提交一次推送，不再需要 Script Console 往返。推 harbor 的方式是带 `PUSH_HARBOR=true` 重跑 job（目标机 admin 用户需已有 `harbor.jereh.cn` 的 docker login——现状已具备）。
 
+job 的 config.xml 里 `CpsScmFlowDefinition` 必须嵌经典的 `hudson.plugins.git.GitSCM`；新版多分支风格的 `jenkins.plugins.git.GitSCMSource` 会在构建启动时 NPE：轻量检出抛 `Cannot invoke "hudson.scm.SCM.getKey()" because "scm" is null`，关掉 lightweight 也一样。设置方法：GET/POST `/job/<name>/config.xml`（API token 认证免 CSRF crumb）；Script Console 根本构造不了这些类（其类加载器拒绝嵌套/不可解析的 import）。
+
+构建 #23 是完全由仓库 Jenkinsfile 驱动的首跑：SUCCESS，1353 秒，`PUSH_HARBOR=true`，发布 `harbor.jereh.cn/base/dsh:dev-amd64`、`base/dsh-aio:dev-amd64`、`base/dsh-aio:dev-amd64-13de9a67`（经 harbor v2 tags API 验证）。
+
 ## 复用要点
 
 - Jenkins→10.1.17.58 的 SSH：用户 **admin**（root 与 Admin 均被拒），凭据 `ssh`，pipeline 用 `sshagent(credentials:['ssh'])`。

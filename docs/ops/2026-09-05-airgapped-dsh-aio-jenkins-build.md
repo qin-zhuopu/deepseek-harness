@@ -49,6 +49,10 @@ Smoke job `dsh-aio-dev-smoke` on the same host: container runs, noVNC `:6080/vnc
 
 The pipeline now lives in the repository root as `Jenkinsfile`, and job `dsh-aio-dev-build` is configured as **Pipeline script from SCM** (Bitbucket `AI/deepseek-harness`, branch `master`, credential `bitbucket`, script path `Jenkinsfile`). Editing the pipeline is a commit + push; no Script Console round-trips. Harbor pushes arrive by rerunning the job with `PUSH_HARBOR=true` (docker login for `harbor.jereh.cn` must exist on the target host's admin user — it does).
 
+The job config.xml must embed a classic `hudson.plugins.git.GitSCM` inside `CpsScmFlowDefinition`. The newer `jenkins.plugins.git.GitSCMSource` (multibranch-style) variant NPEs at build start: lightweight checkout throws `Cannot invoke "hudson.scm.SCM.getKey()" because "scm" is null`, and the failure persists with lightweight disabled. Set the definition by GET/POST of `/job/<name>/config.xml` (API-token auth needs no CSRF crumb); the Script Console cannot construct these classes at all (its classloader rejects nested/unresolvable imports).
+
+Build #23 was the first run driven entirely by the repository Jenkinsfile: SUCCESS in 1353s with `PUSH_HARBOR=true`, publishing `harbor.jereh.cn/base/dsh:dev-amd64`, `base/dsh-aio:dev-amd64`, and `base/dsh-aio:dev-amd64-13de9a67` (verified via the harbor v2 tags API).
+
 ## Reusable facts
 
 - Jenkins→10.1.17.58 SSH: user **admin** (root and Admin are both rejected), credential `ssh`, pipeline wraps steps in `sshagent(credentials:['ssh'])`.

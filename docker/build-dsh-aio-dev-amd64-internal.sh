@@ -41,7 +41,20 @@ die() { printf '\033[1;31m[aio-dev-amd64-internal] ERROR\033[0m %s\n' "$*" >&2; 
 [ "$(uname -m)" = x86_64 ] || die "本脚本只 amd64 原生构建（当前 $(uname -m)）。"
 command -v docker >/dev/null || die "未找到 docker。"
 
-COMMIT="${DSH_CLIENT_COMMIT_HASH:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}"
+resolve_commit() {
+  # No git binary on the air-gapped host: read the checked-out sha from .git
+  # directly (Jenkins syncs a detached-HEAD tree, so HEAD holds the sha).
+  local h
+  [ -f .git/HEAD ] || return 1
+  h="$(cat .git/HEAD)"
+  case "$h" in
+    ref:*) local ref="${h#ref: }"
+           h="$(cat ".git/$ref" 2>/dev/null || cat .git/packed-refs 2>/dev/null | awk -v r="$ref" '$2==r{print $1}' | head -1)" ;;
+  esac
+  printf "%s\n" "$h" | grep -qE "^[0-9a-f]{40}$" || return 1
+  printf "%s\n" "$h"
+}
+COMMIT="${DSH_CLIENT_COMMIT_HASH:-$(resolve_commit || echo unknown)}"
 COMMIT_SHORT="$(printf '%.8s' "$COMMIT")"
 BUILD_TS="$(date -u +%Y%m%dT%H%M%SZ)"
 

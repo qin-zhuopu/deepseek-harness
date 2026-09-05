@@ -58,6 +58,16 @@ Build #23 was the first run driven entirely by the repository Jenkinsfile: SUCCE
 - First harbor smoke: container up, noVNC 200, node/Chrome present, but **`dsh web` never listened** (180s, then a 14-minute watch). Root cause found with `bash -x`: the entrypoint forked `pnpm dev:web --poll` and immediately `exec`'d `pnpm dsh web`; dev:web's first cold pass rewrites `apps/web/dist` over the baked build and vite leaves the tree half-written for minutes — web booted against that tree and died pre-listen. Fixed in entrypoint.sh: web now starts only after the watch build exits (or 25-minute cap) and `apps/web/dist/index.html` has been quiet for 5s. Rebuilt as build #24 (SUCCESS, harbor re-pushed).
 - Host quirk, same as `docs/ops/2026-09-01` recorded on the crun host: on 17.58 (CentOS 7, docker 20.10.8/runc) a plain `docker run -d` of the image freezes PID1 mid-boot — entrypoint logs stop at the autocutsel/noVNC stage, nothing after. With the repo-documented workaround (`--entrypoint bash … -c 'sleep 60000'` + `docker exec -d … /usr/local/bin/entrypoint.sh`) the full stack comes up and **web answers 200 at t=45s** on the fixed image. Deploy on this host must use the two-step launch; entrypoint-as-PID1 works on the other deploy hosts.
 
+## Domain exposure via nginx-proxy (dsh.jereh-pe.cn)
+
+The wildcard `*.jereh-pe.cn` resolves to 17.58, where `jr-nginx-proxy` runs on the compose default network `dc_default` of `/home/admin/git/dc/docker-compose.yml` (docker-compose v1 1.29.2). The old compose `dsh-aio` service (image prod, container `dsh-aio-dc`, vhost `dsh.jr.zhuopu.net`, not running) was rewritten in place to the new image and domain; the previous file was backed up alongside as `docker-compose.yml.bak.<ts>`, and the `NR_API_KEY` env line was carried over verbatim.
+
+- jc registered the instance: `jc nginx-proxy add --name zhuopu1758 --host 10.1.17.58 --user admin --compose-dir /home/admin/git/dc --domain-suffix "*.jereh-pe.cn"`. `jc nginx-proxy service add` only emits a minimal service block (image/VIRTUAL_HOST/VIRTUAL_PORT), so the block was composed by hand on the full 0005 recipe; jc's `service list/up` still work against the same file. This container has no `ssh` binary, so all remote edits went through the Jenkins `ssh` credential with base64'd script uploads.
+- PID1-freeze handling inside compose: `entrypoint: ["bash","-c","sleep 60000"]` plus a bind-mounted `/home/admin/dsh-aio-supervise.sh` (exits if `/tmp/entrypoint.log` exists, else backgrounds `entrypoint.sh`). `docker restart dsh-aio` alone starts web again after ~45s; `docker-compose up -d` needs the hook exec'd once after container creation.
+- Environment (0005 recipe): `FRONT_PORT=8080`, `VNC_PUBLIC_URL=/vnc`, `RESIZE_ENDPOINT=/resize`, `TRUSTED_HOSTS=dsh.jereh-pe.cn`, `VIRTUAL_HOST=dsh.jereh-pe.cn`, `VIRTUAL_PORT=8080`, `HTTPS_METHOD=noredirect`.
+- Verified end to end: `GET /` 200, `/vnc/vnc.html` 200, `POST /api/workspace.list` with Host+Origin `dsh.jereh-pe.cn` 200 (trust fence passes on the declared authority), HTTPS 000 (no cert on this proxy — HTTP only).
+- The vhost is unauthenticated; same note as 0005: anyone reaching the proxy reaches a dsh control plane.
+
 ## Reusable facts
 
 - Jenkins→10.1.17.58 SSH: user **admin** (root and Admin are both rejected), credential `ssh`, pipeline wraps steps in `sshagent(credentials:['ssh'])`.

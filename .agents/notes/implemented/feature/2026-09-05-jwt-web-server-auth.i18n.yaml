@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-05-jwt-web-server-auth.md
-2026-09-05-jwt-web-server-auth.md: 2b13f677106993ca0b110355846c3f6f1ccfcc45
-2026-09-05-jwt-web-server-auth.zh.md: 80fa9f1a7d47641b67f8603ba0b632a51e6a563d
+2026-09-05-jwt-web-server-auth.md: 34f737a95665030a613f3675a53cc91010b8eaa7
+2026-09-05-jwt-web-server-auth.zh.md: 9538b5bccf01f4ebc958a5c3aacfc6da76de5b4b

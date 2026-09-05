@@ -1,0 +1,89 @@
+// =====================================================================
+// Per-user IDE provisioning executor for the ide portal (0008). The Jenkins
+// job "ide-provision" (new-jenkins.jereh.cn) is configured as Pipeline
+// script from SCM against this repository's master branch with the
+// `bitbucket` credential; the portal triggers it via buildWithParameters
+// and tails this console for [DSH_STEP] markers — console text is the
+// progress channel, so nothing here may print the model key (SR5).
+//
+// Flow: checkout -> ship docker/ide-provision/provision.sh to the host ->
+// ssh admin@host sh -s, key piped through stdin on create only. The ssh
+// credential `ssh` (user admin) already exists; the portal token never
+// reaches the host and the host key never reaches the portal (SR3).
+// disableConcurrentBuilds keeps host mutations serial, so a burst of
+// portal retries cannot race `docker run`/`docker rm` (FR7 pairs this with
+// the portal's per-uid in-process lock and the script's name-conflict
+// tolerance).
+// =====================================================================
+pipeline {
+  agent { label 'jenkins1 || jenkins2' }
+  parameters {
+    string(name: 'UID', defaultValue: '', description: 'employee number (portal-validated ^[0-9]{1,8}$)')
+    string(name: 'ACTION', defaultValue: 'probe', description: 'create | start | probe | stop')
+    string(name: 'IMAGE_TAG', defaultValue: 'dev-amd64', description: 'tag of harbor.jereh.cn/base/dsh-aio')
+    password(name: 'MODEL_KEY', defaultValue: '', description: 'platform LLM key; create only, never echoed (FR10, SR5)')
+    string(name: 'REQUEST_ID', defaultValue: '', description: 'portal request correlation id')
+  }
+  environment {
+    SSH_USER = 'admin'
+    TARGET_HOST = '10.1.17.58'
+    DOMAIN_SUFFIX = 'jereh-pe.cn'
+  }
+  options { timestamps(); disableConcurrentBuilds(); skipDefaultCheckout(); timeout(time: 25, unit: 'MINUTES') }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+    stage('Provision on host') {
+      steps {
+        sshagent(credentials: ['ssh']) {
+          script {
+            // Strict allow-lists before ANY interpolation into a shell string:
+            // these values arrive over the Jenkins API from the portal, and
+            // the host command line is the injection surface. The portal
+            // validated the same shapes; this is SR1's second layer.
+            def uid = params.UID ?: ''
+            def action = params.ACTION ?: ''
+            def imageTag = params.IMAGE_TAG ?: ''
+            def requestId = params.REQUEST_ID ?: ''
+            if (!uid.matches('[0-9]{1,8}')) { error "UID must match ^[0-9]{1,8}\$" }
+            if (!(action in ['create', 'start', 'probe', 'stop'])) { error 'ACTION must be create|start|probe|stop' }
+            if (!imageTag.matches('[A-Za-z0-9._-]{1,80}')) { error 'IMAGE_TAG must be a plain tag' }
+            if (!requestId.matches('[A-Za-z0-9._-]{0,64}')) { error 'REQUEST_ID must be a plain token' }
+            sh '''
+set -e
+ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$TARGET_HOST" "mkdir -p /opt/ide-provision"
+cat docker/ide-provision/provision.sh | ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" "cat > /opt/ide-provision/provision.sh.new && chmod 755 /opt/ide-provision/provision.sh.new && mv /opt/ide-provision/provision.sh.new /opt/ide-provision/provision.sh"
+'''
+            // The key rides the ssh session's stdin only — never argv, never
+            // this console; the script writes it to a 0600 file on the host
+            // and unlinks it on exit (0008 Model key flow).
+            def image = "harbor.jereh.cn/base/dsh-aio:${imageTag}"
+            if (action == 'create') {
+              writeFile file: '.model-key.stdin', text: "${params.MODEL_KEY}\n"
+              sh(label: 'provision on host', script: """
+set -e
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash -s /opt/ide-provision/provision.sh' \\
+  '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX' < .model-key.stdin
+""")
+            } else {
+              sh(label: 'provision on host', script: """
+set -e
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash -s /opt/ide-provision/provision.sh' \\
+  '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX'
+""")
+            }
+          }
+        }
+      }
+    }
+  }
+  post {
+    always {
+      // Belt for every path above: the staged key leaves no workspace residue.
+      sh(label: 'wipe staged key', script: 'rm -f .model-key.stdin || true')
+    }
+  }
+}

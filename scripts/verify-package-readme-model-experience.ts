@@ -108,6 +108,8 @@ const SENTENCE_MODEL_EXPERIENCE: Readonly<Record<string, SentenceContract>> = {
   'packages/host/directory-picker-auto': { kind: 'none', reason: 'The GUI-host picking chooser only mounts a backend row; it registers nothing model-facing.' },
   'packages/host/directory-picker-browse': { kind: 'none', reason: 'The GUI-host picking backend registers nothing model-facing.' },
   'packages/host/directory-picker-native': { kind: 'none', reason: 'The GUI-host picking backend registers nothing model-facing.' },
+  'packages/host/auth-core': { kind: 'none', reason: 'Shared HTTP gate mechanics answer browser and API requests and register nothing model-facing.' },
+  'packages/host/auth-iam': { kind: 'none', reason: 'The OIDC gate answers browser HTTP requests and registers nothing model-facing.' },
   'packages/host/auth-jwt': { kind: 'none', reason: 'The JWT gate answers browser and API HTTP requests and registers nothing model-facing.' },
   'packages/host/webserver': { kind: 'none', reason: 'The HTTP carrier bridges browser and API handler and registers nothing model-facing.' },
   'packages/host/frontend-static': { kind: 'none', reason: 'The SPA dist server answers browser asset requests and registers nothing model-facing.' },

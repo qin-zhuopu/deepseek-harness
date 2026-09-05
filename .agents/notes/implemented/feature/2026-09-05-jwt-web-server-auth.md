@@ -14,6 +14,8 @@ The webserver served every surface — the `/api` RPC bridge, WebSocket downlink
 
 The package carries its own login surface: `GET /login` renders a password form, `POST /login` verifies the password against the configured `secret` with a hash compare and issues `{sub, iat, exp}` as an `HttpOnly` `SameSite=Lax` cookie (JSON clients get `{token}` instead of HTML), and `GET /logout` clears the cookie. Both paths are exempt from the guard by pathname. Navigations (`Sec-Fetch-Mode: navigate`, or `Accept: text/html` on GET/HEAD) get `302` to `/login?next=…`; everything else gets `401` with `WWW-Authenticate: Bearer realm="dsh"`. `next` must be root-relative and backslash-free, so the login page cannot serve as an open redirect.
 
+The gate, cookie, and challenge mechanics of this note now live in [`@deepseek-ai/dsh-host-auth-core`](../../../../packages/host/auth-core/README.md), shared with the Jereh IAM OIDC gate ([note](2026-09-05-jereh-iam-oidc-integration.md)); the login form, password check, and HS256 codec remain here.
+
 The configured `secret` (required, minimum 32 characters) is both the HMAC key and the shared password. Tokens are stateless HS256 over `node:crypto`: `alg` must be exactly `HS256` (so `alg: none` and algorithm swaps fail verification), segments must canonicalize through base64url (rejecting padded or lenient forms before parsing), the signature compare is constant-time, and a numeric `exp` at or before now is rejected. `jose` exists only transitively in the lockfile; adding it as a direct dependency would replace roughly 60 lines of pinned, fully tested crypto glue with a dependency carrying its own audit surface, so the repository's dependencies-over-hand-rolling rule does not apply at this seam.
 
 ## Consequences

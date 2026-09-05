@@ -16,3 +16,5 @@
 | [0004](0004-dockerfile-variants.zh.md) | Dockerfile 变体矩阵:公网/内网 × dev/生产 |
 | [0005](0005-reverse-proxy-exposure.zh.md) | 把 aio 镜像暴露到反向代理后面:front-proxy、/api 信任栅栏,以及两个错误假设 |
 | [0006](0006-aio-build-deploy-scripts.zh.md) | aio 的 build/ci/deploy 脚本:各干什么、何时用 |
+| [0007](0007-per-user-ide-requirements.zh.md) | 按需开通每用户 IDE 服务:需求、用户故事、时序、未决事项 |
+| [0008](0008-per-user-ide-design.zh.md) | 按需开通每用户 IDE 服务:Portal、Jenkins 执行器、docker-run 配方、健康检查 |

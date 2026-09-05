@@ -67,7 +67,7 @@ type UpgradeGuardVerdict = true | { status: number; headers?: Record<string, str
 type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>
 ```
 
-闸门是可叠加的：每个请求都会按注册顺序依次咨询所有已注册的 `WebGuard`，每次 upgrade 都会按注册顺序依次咨询所有已注册的 `UpgradeGuard`，直到第一个拒绝出现。随附的闸门持有者是 [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts)：它的 fiber 激活时，任何路由、回退响应或 upgrade 之前都要求 bearer token 或认证 cookie；没有任何闸门注册时服务器保持开放。
+闸门是可叠加的：每个请求都会按注册顺序依次咨询所有已注册的 `WebGuard`，每次 upgrade 都会按注册顺序依次咨询所有已注册的 `UpgradeGuard`，直到第一个拒绝出现。随附的闸门持有者是 [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts)（HS256 共享密钥 token）与 [`dsh-host-auth-iam`](../../packages/host/auth-iam/src/index.ts)（对照提供方 JWKS 验签的企业 OIDC id_token），两者都经由共享的 [`dsh-host-auth-core`](../../packages/host/auth-core/src/index.ts) 挂载；其 fiber 激活时，任何路由、回退响应或 upgrade 之前都要求 bearer token 或认证 cookie；没有任何闸门注册时服务器保持开放。
 
 ## 配置
 

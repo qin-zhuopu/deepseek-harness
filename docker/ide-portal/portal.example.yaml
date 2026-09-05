@@ -1,0 +1,16 @@
+# Portal deployment config (0008 Configuration) — mounted at /etc/ide-portal/portal.yaml.
+# Secrets are NOT here: IDE_JENKINS_TOKEN and the model key env file arrive via
+# --env-file at run time; modelKey.envFile points INSIDE the container at the
+# mounted key file, which provisioning copies to a fresh 0600 file per create.
+domainSuffix: jereh-pe.cn
+entryHost: ide.jereh-pe.cn
+uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
+imageTag: dev-amd64                       # pin to dev-amd64-<sha> per rollout step (C6)
+modelKey: {envFile: /run/secrets/ide-model.env, varName: NR_API_KEY}
+jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
+iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
+health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
+# The proxy reaches the container over dc_default (0005), so bind all interfaces;
+# the loopback-only rule belongs to dsh web, not to this plain service.
+bindHost: 0.0.0.0
+port: 8080

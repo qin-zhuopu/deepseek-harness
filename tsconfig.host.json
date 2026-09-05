@@ -89,6 +89,7 @@
     "apps/web/tests/workflow-run.e2e.ts",
     "apps/web/stress-tests/reasoning-chunks.stress.ts",
     "apps/cli/tests/**/*.ts",
+    "apps/ide-portal/tests/**/*.ts",
     "examples/*/src/**/*.ts",
     "examples/*/start.ts",
     "examples/*/tests/**/*.ts",
@@ -300,6 +301,8 @@
     { "path": "./packages/host/directory-picker-browse" },
     { "path": "./packages/host/directory-picker-native" },
     { "path": "./packages/host/frontend-static" },
+    { "path": "./packages/host/auth-core" },
+    { "path": "./packages/host/auth-iam" },
     { "path": "./packages/host/auth-jwt" },
     { "path": "./packages/host/plugin-inventory" },
     { "path": "./packages/host/webserver" },
@@ -308,6 +311,7 @@
     { "path": "./packages/lsp/lsp" },
     { "path": "./packages/lsp/lsp-stdio" },
     { "path": "./packages/lsp/tool-lsp" },
-    { "path": "./apps/cli" }
+    { "path": "./apps/cli" },
+    { "path": "./apps/ide-portal" }
   ]
 }

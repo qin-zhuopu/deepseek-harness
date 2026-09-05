@@ -14,6 +14,8 @@ webserver 的每一个请求面——`/api` RPC 桥、下行 WebSocket、插件 
 
 该包自带登录面：`GET /login` 渲染口令表单，`POST /login` 用哈希比较把口令与配置的 `secret` 对照，并把 `{sub, iat, exp}` 作为 `HttpOnly` `SameSite=Lax` cookie 签发（JSON 客户端拿到 `{token}` 而不是 HTML），`GET /logout` 清除 cookie。这两个路径按路径名豁免于闸门。导航请求（`Sec-Fetch-Mode: navigate`，或 GET／HEAD 上的 `Accept: text/html`）得到 `302` 跳转 `/login?next=…`；其余请求得到带 `WWW-Authenticate: Bearer realm="dsh"` 的 `401`。`next` 必须是根相对且不含反斜杠的，登录页因此不能充当开放重定向。
 
+本笔记中的闸门、cookie 与挑战机制现居 [`@deepseek-ai/dsh-host-auth-core`](../../../../packages/host/auth-core/README.zh.md)，与 Jereh IAM OIDC 闸门（[笔记](2026-09-05-jereh-iam-oidc-integration.zh.md)）共享；登录表单、口令校验与 HS256 编解码仍在本包。
+
 配置的 `secret`（必填，至少 32 字符）既是 HMAC 密钥也是共享口令。token 是基于 `node:crypto` 的无状态 HS256：`alg` 必须恰为 `HS256`（`alg: none` 与算法替换都验不过），各段必须能通过 base64url 规范化（带 padding 或宽敏形式在解析前即被拒绝），签名比较是常数时间的，数值型 `exp` 到期即拒。`jose` 在 lockfile 里只是传递依赖；把它升为直接依赖会用约 60 行被钉死、测试齐全的加密胶水换来一个自带审计面的依赖，仓库"依赖优先于手搓"的规则在这个 seam 上不成立。
 
 ## Consequences

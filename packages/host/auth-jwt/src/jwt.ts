@@ -7,6 +7,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { decodeBase64Url } from '@deepseek-ai/dsh-host-auth-core'
 
 /** Claims a verified token carries; issuers may add fields, so unknown members stay visible. */
 export interface JwtClaims {
@@ -33,8 +34,7 @@ function base64url(input: string): string {
  * @returns the decoded bytes, or undefined when the segment is not canonical base64url.
  */
 function decodeSegment(segment: string): Buffer | undefined {
-  const bytes = Buffer.from(segment, 'base64url')
-  return bytes.toString('base64url') === segment ? bytes : undefined
+  return decodeBase64Url(segment)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -1,0 +1,14 @@
+:root { color-scheme: light dark; }
+body { font: 15px/1.5 system-ui, sans-serif; margin: 0; display: grid; place-items: start center; min-height: 100vh; }
+main { width: min(760px, 92vw); padding: 2rem 0 3rem; }
+h1 { font-size: 1.25rem; }
+.state { padding: .5rem .75rem; border-radius: 6px; background: color-mix(in srgb, currentColor 10%, transparent); margin-bottom: 1rem; }
+.state.ready { background: #e6f6e6; color: #14532d; }
+.state.failed, .state.timeout { background: #fdeaea; color: #7f1d1d; }
+pre#log { background: #0b1021; color: #d7e0ff; padding: .75rem 1rem; border-radius: 8px; min-height: 16rem; max-height: 40rem; overflow: auto; white-space: pre-wrap; }
+.step.ok { color: #9ff0b6; }
+.step.fail { color: #ff9d9d; }
+.step.info { color: #9db9ff; }
+.actions { display: flex; gap: .75rem; margin-top: 1rem; }
+button { font: inherit; padding: .5rem 1.25rem; border-radius: 6px; border: 1px solid #8884; background: transparent; cursor: pointer; }
+button#open { background: #2563eb; color: #fff; border-color: #2563eb; }

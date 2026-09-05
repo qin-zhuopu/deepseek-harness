@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fake curl for the provision.sh smoke suite (provision.spec.ts): reports the
+# HTTP code stored in $FAKE_DOCKER_DIR/http.code and otherwise behaves like
+# `curl -w %{http_code}` (exit 0), or like `curl -f` on a non-2xx (exit 22).
+set -u
+code=000
+if [ -f "${FAKE_DOCKER_DIR}/http.code" ]; then code=$(cat "${FAKE_DOCKER_DIR}/http.code"); fi
+for arg in "$@"; do
+  if [ "$arg" = '-w' ]; then printf '%s' "$code"; exit 0; fi
+done
+[ "$code" = 200 ] || exit 22

@@ -11,6 +11,7 @@ import type { IncomingMessage } from 'node:http'
 import { Context } from '@deepseek-ai/cordis'
 import WebServer from '@deepseek-ai/dsh-host-webserver'
 import * as AuthJwt from '../src/index.ts'
+import { isNavigation, presentedToken, safeNext } from '@deepseek-ai/dsh-host-auth-core'
 
 const SECRET = 'defaults-secret-0000000000000000000000000000'
 
@@ -88,31 +89,31 @@ describe('apply with unresolved config', () => {
 
 describe('presentedToken', () => {
   it('prefers the Bearer header and skips malformed cookie fragments', () => {
-    expect(AuthJwt.presentedToken(fakeRequest({ authorization: 'Bearer hdr' }), 'c')).toBe('hdr')
-    expect(AuthJwt.presentedToken(fakeRequest({ authorization: 'Basic x' }), 'c')).toBeUndefined()
-    expect(AuthJwt.presentedToken(fakeRequest({ authorization: 'Bearer    ' }), 'c')).toBeUndefined()
-    expect(AuthJwt.presentedToken(fakeRequest({ cookie: '=leading; bare; c=tok' }), 'c')).toBe('tok')
-    expect(AuthJwt.presentedToken(fakeRequest({ cookie: 'c=' }), 'c')).toBeUndefined()
-    expect(AuthJwt.presentedToken(fakeRequest({}), 'c')).toBeUndefined()
+    expect(presentedToken(fakeRequest({ authorization: 'Bearer hdr' }), 'c')).toBe('hdr')
+    expect(presentedToken(fakeRequest({ authorization: 'Basic x' }), 'c')).toBeUndefined()
+    expect(presentedToken(fakeRequest({ authorization: 'Bearer    ' }), 'c')).toBeUndefined()
+    expect(presentedToken(fakeRequest({ cookie: '=leading; bare; c=tok' }), 'c')).toBe('tok')
+    expect(presentedToken(fakeRequest({ cookie: 'c=' }), 'c')).toBeUndefined()
+    expect(presentedToken(fakeRequest({}), 'c')).toBeUndefined()
   })
 })
 
 describe('safeNext', () => {
   it('accepts root-relative paths and refuses protocol-relative and backslash forms', () => {
-    expect(AuthJwt.safeNext('/session/42')).toBe('/session/42')
-    expect(AuthJwt.safeNext('/x?a=1&b=2')).toBe('/x?a=1&b=2')
-    expect(AuthJwt.safeNext('//evil.example')).toBeUndefined()
-    expect(AuthJwt.safeNext('/\\evil.example')).toBeUndefined()
-    expect(AuthJwt.safeNext('http://evil.example')).toBeUndefined()
-    expect(AuthJwt.safeNext(undefined)).toBeUndefined()
+    expect(safeNext('/session/42')).toBe('/session/42')
+    expect(safeNext('/x?a=1&b=2')).toBe('/x?a=1&b=2')
+    expect(safeNext('//evil.example')).toBeUndefined()
+    expect(safeNext('/\\evil.example')).toBeUndefined()
+    expect(safeNext('http://evil.example')).toBeUndefined()
+    expect(safeNext(undefined)).toBeUndefined()
   })
 })
 
 describe('isNavigation', () => {
   it('recognizes browser navigations and rejects API reads', () => {
-    expect(AuthJwt.isNavigation(fakeRequest({ 'sec-fetch-mode': 'navigate', method: '' }))).toBe(true)
-    expect(AuthJwt.isNavigation({ method: 'GET', headers: { accept: 'text/html,application/xhtml+xml' } } as unknown as IncomingMessage)).toBe(true)
-    expect(AuthJwt.isNavigation({ method: 'POST', headers: { accept: 'text/html' } } as unknown as IncomingMessage)).toBe(false)
-    expect(AuthJwt.isNavigation({ method: 'GET', headers: { accept: 'application/json' } } as unknown as IncomingMessage)).toBe(false)
+    expect(isNavigation(fakeRequest({ 'sec-fetch-mode': 'navigate', method: '' }))).toBe(true)
+    expect(isNavigation({ method: 'GET', headers: { accept: 'text/html,application/xhtml+xml' } } as unknown as IncomingMessage)).toBe(true)
+    expect(isNavigation({ method: 'POST', headers: { accept: 'text/html' } } as unknown as IncomingMessage)).toBe(false)
+    expect(isNavigation({ method: 'GET', headers: { accept: 'application/json' } } as unknown as IncomingMessage)).toBe(false)
   })
 })

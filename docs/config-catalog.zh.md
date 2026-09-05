@@ -834,6 +834,41 @@ export interface Config {
 
 来源：[`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
 
+<a id="deepseek-aidsh-host-auth-iam"></a>
+
+## `@deepseek-ai/dsh-host-auth-iam`
+
+依赖：`webServer`
+
+```ts config-catalog
+/** Plugin config: the OIDC client, local surface, and verification knobs. */
+export interface Config {
+  /** Provider issuer URI; discovery and JWKS are read from it. */
+  issuer: string
+  /** OAuth2 client id issued to this deployment (e.g. `EnterpriseDingtalk`). */
+  clientId: string
+  /** Exact externally-visible callback path; must match the provider registration. Default: `/auth/callback`. */
+  redirectPath?: string
+  /** Cookie carrying the verified id_token for same-origin browser requests. Default: `dsh_token`. */
+  cookie?: string
+  /** Exact path that starts the provider redirect. Default: `/login`. */
+  loginPath?: string
+  /** Exact path that clears the session cookie. Default: `/logout`. */
+  logoutPath?: string
+  /** Add `Secure` to the session cookie; enable only behind TLS. Default: false. */
+  secureCookie?: boolean
+  /** Verify signature and `aud` only, skipping the `iss` equality check;
+   * for deployments reached on a host alias of the provider URL. Default: false. */
+  allowIssuerMismatch?: boolean
+  /** Provider document / JWKS cache lifetime in minutes. Default: 60. */
+  refreshMinutes?: number
+  /** Timeout for one discovery or JWKS fetch in milliseconds. Default: 8000. */
+  fetchTimeoutMs?: number
+}
+```
+
+来源：[`packages/host/auth-iam/src/index.ts:48`](../packages/host/auth-iam/src/index.ts)
+
 <a id="deepseek-aidsh-host-auth-jwt"></a>
 
 ## `@deepseek-ai/dsh-host-auth-jwt`
@@ -3368,6 +3403,7 @@ export interface Config {
 - `@deepseek-ai/dsh-code-runtime-python`（[`packages/code-runtime/code-runtime-python/src/index.ts`](../packages/code-runtime/code-runtime-python/src/index.ts)）
 - `@deepseek-ai/dsh-home-paths`（[`packages/util/home-paths/src/index.ts`](../packages/util/home-paths/src/index.ts)）
 - `@deepseek-ai/dsh-hook-protocol`（[`packages/hooks/hook-protocol/src/index.ts`](../packages/hooks/hook-protocol/src/index.ts)）
+- `@deepseek-ai/dsh-host-auth-core`（[`packages/host/auth-core/src/index.ts`](../packages/host/auth-core/src/index.ts)）
 - `@deepseek-ai/dsh-launch-environment`（[`packages/util/launch-environment/src/index.ts`](../packages/util/launch-environment/src/index.ts)）
 - `@deepseek-ai/dsh-llm-mock-server`（[`packages/test-support/llm-mock-server/src/index.ts`](../packages/test-support/llm-mock-server/src/index.ts)）
 - `@deepseek-ai/dsh-loader-smoke`（[`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts)）

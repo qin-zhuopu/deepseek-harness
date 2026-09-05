@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-Web 服务器的 JWT bearer 认证：一个函数插件（`name`／`inject`／`Config`／`apply`，依赖 `webServer`）。其 fiber 挂载期间，每条具名 HTTP 路由、回退（SPA dist）面、以及每次 WebSocket upgrade 都要求一个紧凑的 HS256 JWT；未认证请求根本到不了路由处理器。该 row 是自选的：没有 `auth-jwt` row（或 row 被禁用）时，服务器与此前一样保持无认证；dispose 该 fiber 即恢复开放面（HMR 安全）。
+Web 服务器的 JWT bearer 认证：一个函数插件（`name`／`inject`／`Config`／`apply`，依赖 `webServer`）。其 fiber 挂载期间，每条具名 HTTP 路由、回退（SPA dist）面、以及每次 WebSocket upgrade 都要求一个紧凑的 HS256 JWT；未认证请求根本到不了路由处理器。该 row 是自选的：没有 `auth-jwt` row（或 row 被禁用）时，服务器与此前一样保持无认证；dispose 该 fiber 即恢复开放面（HMR 安全）。闸门、cookie 与挑战机制经由 [`dsh-host-auth-iam`](../auth-iam/README.zh.md) 与 [`dsh-host-auth-core`](../auth-core/README.zh.md) 共享。
 
 token 是用配置的 `secret` 签名的紧凑 JWT（HMAC-SHA256，常数时间验签；只接受 `alg: HS256`，因此 `alg: none` 与算法替换永远验不过；数值型 `exp` 会被强制执行）。它走两条通道之一：
 

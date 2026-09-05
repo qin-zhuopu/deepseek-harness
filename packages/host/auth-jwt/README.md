@@ -2,7 +2,7 @@
 
 English | [中文](README.zh.md)
 
-JWT bearer authentication for the Web server: a function plugin (`name`/`inject`/`Config`/`apply`, requires `webServer`). While its fiber is mounted, every named HTTP route, the fallback (SPA dist) surface, and every WebSocket upgrade requires a compact HS256 JWT; unauthenticated requests never reach a route handler. The row is opt-in: with no `auth-jwt` row (or the row disabled) the server stays exactly as unauthenticated as before, and disposing the fiber restores the open surface (HMR-safe).
+JWT bearer authentication for the Web server: a function plugin (`name`/`inject`/`Config`/`apply`, requires `webServer`). While its fiber is mounted, every named HTTP route, the fallback (SPA dist) surface, and every WebSocket upgrade requires a compact HS256 JWT; unauthenticated requests never reach a route handler. The row is opt-in: with no `auth-jwt` row (or the row disabled) the server stays exactly as unauthenticated as before, and disposing the fiber restores the open surface (HMR-safe). The guard, cookie, and challenge mechanics are shared with [`dsh-host-auth-iam`](../auth-iam/README.md) through [`dsh-host-auth-core`](../auth-core/README.md).
 
 The token is a compact JWT signed with the configured `secret` (HMAC-SHA256, constant-time verify; only `alg: HS256` is accepted, so `alg: none` and algorithm substitution never verify; a numeric `exp` is enforced). It travels on either channel:
 

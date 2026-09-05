@@ -67,7 +67,7 @@ type UpgradeGuardVerdict = true | { status: number; headers?: Record<string, str
 type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>
 ```
 
-Guards are additive: every registered `WebGuard` is consulted per request and every registered `UpgradeGuard` per upgrade, each in registration order, until the first rejection. The shipped gate owner is [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts), which requires a bearer token or auth cookie before any route, fallback response, or upgrade when its fiber is active; with no guard registered the server is open.
+Guards are additive: every registered `WebGuard` is consulted per request and every registered `UpgradeGuard` per upgrade, each in registration order, until the first rejection. The shipped gate owners are [`dsh-host-auth-jwt`](../../packages/host/auth-jwt/src/index.ts) (HS256 shared-secret tokens) and [`dsh-host-auth-iam`](../../packages/host/auth-iam/src/index.ts) (enterprise OIDC id_tokens verified against the provider JWKS), both mounting through the shared [`dsh-host-auth-core`](../../packages/host/auth-core/src/index.ts); each requires a bearer token or auth cookie before any route, fallback response, or upgrade when its fiber is active, and with no guard registered the server is open.
 
 ## Config
 

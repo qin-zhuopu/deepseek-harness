@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Fake docker CLI for the provision.sh smoke suite (provision.spec.ts): the
+# container model is the set of files in $FAKE_DOCKER_DIR. `<name>.state` holds
+# the docker state (`running`, `exited`, …), `image.state` marks the image as
+# local, `run-args.txt` records `docker run` argv, `calls.txt` counts hook
+# fires, and `no-hook-flip.state` simulates C2's PID1 freeze (the exec hook
+# leaves the container unstarted). The container name is found by scanning the
+# arguments for the `ide-<digits>` token; only the `run` subcommand parses
+# flags.
+set -euo pipefail
+cmd="${1:-}"; shift || true
+name=""
+for arg in "$@"; do [[ "$arg" =~ ^ide-[0-9]+$ ]] && name="$arg"; done
+state_file="${FAKE_DOCKER_DIR}/${name}.state"
+
+case "$cmd" in
+  inspect)
+    [ -f "$state_file" ] || { echo "Error: No such object: ${name}" >&2; exit 1; }
+    case "${2:-}" in
+      *State.Status*) cat "$state_file" ;;
+      *IPAddress*)
+        if [ "$(cat "$state_file")" = running ]; then echo 172.20.0.99; else echo ""; fi ;;
+      *) echo '{}' ;;
+    esac ;;
+  image)
+    [ -f "${FAKE_DOCKER_DIR}/image.state" ] || { echo "Error: No such image" >&2; exit 1; } ;;
+  pull)
+    touch "${FAKE_DOCKER_DIR}/image.state" ;;
+  run)
+    printf '%s\n' "$*" > "${FAKE_DOCKER_DIR}/run-args.txt"
+    run_name=""; prev=""
+    for arg in "$@"; do
+      if [ "$prev" = '--name' ]; then run_name="$arg"; fi
+      prev="$arg"
+    done
+    if [ -n "$run_name" ] && [ -f "${FAKE_DOCKER_DIR}/${run_name}.state" ]; then
+      echo "docker: Conflict. The container name \"/${run_name}\" is already in use" >&2
+      exit 125
+    fi
+    echo fake-container-id
+    if [ -n "$run_name" ]; then echo created > "${FAKE_DOCKER_DIR}/${run_name}.state"; fi ;;
+  exec)
+    printf 'hook\n' >> "${FAKE_DOCKER_DIR}/calls.txt"
+    echo running > "$state_file"
+    if [ -f "${FAKE_DOCKER_DIR}/no-hook-flip.state" ]; then echo created > "$state_file"; fi ;;
+  start)
+    echo running > "$state_file" ;;
+  stop)
+    echo exited > "$state_file" ;;
+  *)
+    echo "fake-docker: unhandled: $cmd $*" >&2; exit 1 ;;
+esac

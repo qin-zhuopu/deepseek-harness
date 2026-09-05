@@ -7,21 +7,29 @@
 # Nexus mirror; nothing here reaches registry.npmjs.org / dl-cdn.
 #
 # Differences from the public ./Dockerfile:
-#   • base image is pulled from harbor (node:24 is mirrored there)
+#   • base image is pulled from harbor by default (node:24 is mirrored there)
 #   • corepack is pointed at Nexus (it otherwise hardcodes registry.npmjs.org
 #     to fetch pnpm, which is unreachable air-gapped)
 #   • pnpm install runs --no-frozen-lockfile so a locally-adjusted lockfile
 #     (e.g. release-age exclusions) still resolves.
 
-FROM harbor.jereh.cn/base/node:24
+# Build arguments, defaulted to the internal Jereh mirrors; a build host with
+# different mirrors overrides them via --build-arg (same redirect pattern as
+# docker/dsh-aio/Dockerfile.dev):
+#   NODE_IMAGE    base image, harbor mirror by default
+#   NPM_REGISTRY  npm/corepack registry, internal Nexus by default
+ARG NODE_IMAGE=harbor.jereh.cn/base/node:24
+ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
 
-# ── corepack + pnpm (pinned by repo), fetched through the internal Nexus ──
-ENV COREPACK_NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
+FROM ${NODE_IMAGE}
+
+# ── corepack + pnpm (pinned by repo), fetched through the configured registry ──
+ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 ENV COREPACK_INTEGRITY_KEYS=0
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 
-# ── npm through the internal Nexus ──
-RUN npm config set registry https://nexus.jereh.cn/repository/npm-public/
+# ── npm through the configured registry ──
+RUN npm config set registry ${NPM_REGISTRY}
 
 # ── app ──
 WORKDIR /workspaces/deepseek-harness

@@ -18,32 +18,66 @@
 # host loopback (127.0.0.1:9222). NR_API_KEY is injected at runtime.
 #
 # Differences from the public ./Dockerfile:
-#   • node:24 copied from harbor (not the public library image)
+#   • node:24 copied from harbor by default (not the public library image)
 #   • apt sources repointed to the internal Nexus mirror; downloads are
 #     serialized (Pipeline-Depth=0, Queue-Mode=access) with retries because
 #     the mirror rejects apt's default parallel connections.
-# =====================================================================
+#
+# Build arguments, defaulted to the internal Jereh mirrors; a build host with
+# different mirrors overrides them via --build-arg (same redirect pattern as
+# Dockerfile.dev):
+#   DSH_IMAGE          stage-1 source of the built /workspaces/deepseek-harness
+#   CHROME_BASE_IMAGE  runtime base (harbor)
+#   NODE_IMAGE         source of the /opt/node runtime (harbor)
+#   NPM_REGISTRY       npm registry for pnpm/chrome-devtools-mcp (Nexus)
+#   APT_MIRROR         apt mirror base URL substituted into sources.list
+ARG DSH_IMAGE=dsh:dev
+ARG CHROME_BASE_IMAGE=harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
+ARG NODE_IMAGE=harbor.jereh.cn/base/node:24
+ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
+ARG APT_MIRROR=http://10.1.7.49:8081/repository/apt-ubuntu-amd64/
 
 # ---- Stage 1: reuse the already-built dsh app ----
-FROM dsh:dev AS dshbuild
+FROM ${DSH_IMAGE} AS dshbuild
 # /workspaces/deepseek-harness is fully installed + built here.
 
+# ---- Stage 1b: the Node 24 runtime, as a named stage ----
+# BuildKit rejects variable expansion in `COPY --from=`, so the argument is
+# resolved by this FROM and the copies below reference the stage name.
+FROM ${NODE_IMAGE} AS noderuntime
+
 # ---- Stage 2: runtime on the Chrome base ----
-FROM harbor.jereh.cn/base/ubuntu:24.04-node22-python312-chrome
+FROM ${CHROME_BASE_IMAGE}
 
 # Node 24 in an isolated prefix (base image ships an unusable nvm node).
-COPY --from=harbor.jereh.cn/base/node:24 /usr/local/bin/node /opt/node/bin/node
-COPY --from=harbor.jereh.cn/base/node:24 /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
+COPY --from=noderuntime /usr/local/bin/node /opt/node/bin/node
+COPY --from=noderuntime /usr/local/lib/node_modules/npm /opt/node/lib/node_modules/npm
 ENV PATH=/opt/node/bin:$PATH
+# Re-declare NPM_REGISTRY inside this runtime stage: ARGs do not cross FROM
+# boundaries, so the top-level default above is invisible here without this line.
+ARG NPM_REGISTRY
 RUN ln -sf /opt/node/lib/node_modules/npm/bin/npm-cli.js /opt/node/bin/npm \
- && npm config set registry https://nexus.jereh.cn/repository/npm-public/ \
+ && npm config set registry ${NPM_REGISTRY} \
  && npm install -g pnpm@11.7.0 chrome-devtools-mcp@1.7.0
 
-# Display/VNC stack via the internal Nexus mirror; serialized downloads +
-# retries because the mirror 502s under apt's default parallel fetches.
+# Display/VNC stack via the internal mirror; serialized downloads + retries
+# because the Nexus proxy 502s under apt's default parallel fetches.
 # Xvnc (dynamic RandR sizes) replaces the old xvfb+x11vnc pair.
-RUN sed -i 's|http://mirrors.aliyun.com/ubuntu/|http://10.1.7.49:8081/repository/apt-aliyun/|g' /etc/apt/sources.list \
- && apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
+# noble bases ship deb822 /etc/apt/sources.list.d/ubuntu.sources whose URIs
+# carry no trailing slash (URIs: http://archive.ubuntu.com/ubuntu); older
+# images use /etc/apt/sources.list with trailing slashes. APT_MIRROR must end
+# in / and serve the full ubuntu tree (suites and security live inside it);
+# the with-slash form is substituted first so neither form doubles a slash.
+ARG APT_MIRROR
+RUN set -eux; \
+    [ "${APT_MIRROR%/}" != "${APT_MIRROR}" ] || { echo "APT_MIRROR must end in /" >&2; exit 1; }; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do \
+      [ -f "$f" ] || continue; \
+      for old in http://archive.ubuntu.com/ubuntu http://security.ubuntu.com/ubuntu http://ports.ubuntu.com/ubuntu-ports http://mirrors.aliyun.com/ubuntu; do \
+        sed -i -e "s|${old}/|${APT_MIRROR}|g" -e "s|${old}|${APT_MIRROR%/}|g" "$f"; \
+      done; \
+    done; \
+    apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
       autocutsel xsel \

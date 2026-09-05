@@ -220,8 +220,14 @@ cd /workspaces/deepseek-harness
 # bundles on source edits (scripts/dev-web.ts). Poll mode because container
 # filesystems often deliver no inotify events. Disable with DEV_WATCH=0.
 if [ "${DEV_WATCH:-1}" = 1 ]; then
+  # dev:web rewrites lib/ and apps/web/dist incrementally over the baked
+  # `pnpm run build` output. Cold completion takes minutes on a slow host, and
+  # its vite stage leaves dist half-written until it finishes, so web starts
+  # only once the watch process exits (it exits on completion; on the poll
+  # path rebuilds re-fork it) or the 25-minute cap hits. Starting `dsh web`
+  # against a half-rewritten bundle tree fails before it ever listens.
+  (pnpm dev:web --poll > /tmp/dev-web.log 2>&1; touch /tmp/dev-web.done) &
   log "dev:web watch-build enabled (DEV_WATCH=1; edits under /workspaces/deepseek-harness hot-reload the web UI)"
-  (pnpm dev:web --poll >> /tmp/dev-web.log 2>&1 &)
   # dev:web rewrites apps/web/dist on every rebuild, dropping the VNC-preview
   # injection. Re-apply it whenever the marker goes missing (inject_vnc_preview
   # is a no-op once the marker is present, so this is cheap).
@@ -233,6 +239,23 @@ if [ "${DEV_WATCH:-1}" = 1 ]; then
       done
     ) &
   fi
+  # Initial build gate: wait for the watch process to exit or 25 min, and in
+  # either case let the vite/tsc stages quiesce (5s of dist/index.html quiet)
+  # before booting web.
+  for i in $(seq 1 150); do
+    [ -f /tmp/dev-web.done ] && break
+    pgrep -f 'dev-web|vite|tsc --watch|tsc -w' >/dev/null 2>&1 || { sleep 5; break; }
+    sleep 10
+  done
+  QUIET=""
+  while [ -z "$QUIET" ]; do
+    LAST=$(stat -c %Y apps/web/dist/index.html 2>/dev/null || echo 0)
+    sleep 5
+    NOW=$(stat -c %Y apps/web/dist/index.html 2>/dev/null || echo 0)
+    [ "$NOW" = "$LAST" ] && QUIET=1
+  done
+  rm -f /tmp/dev-web.done
+  log "watch build settled; starting dsh web"
 else
   log "dev:web watch-build disabled (DEV_WATCH=0; serving the baked bundles)"
 fi

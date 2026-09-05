@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决策
 
-所有外部构件改走内网镜像，并把每一项参数化为 Dockerfile 构建参数、默认值即内网地址（`docker/dsh/Dockerfile.internal` 与 `docker/dsh-aio/Dockerfile.internal` 的 `NODE_IMAGE`、`NPM_REGISTRY`、`APT_MIRROR`、`JCLI_DOWNLOAD_BASE`；`DSH_IMAGE`/`CHROME_BASE_IMAGE` 在 `Dockerfile.dev` 中已是参数）。Jenkins（`new-jenkins.jereh.cn`，job `dsh-aio-dev-build`）用 `bitbucket` 凭据检出内网镜像库 `AI/deepseek-harness`，经 tar-over-ssh 以 `admin` 用户同步到 10.1.17.58 的 `/opt/dsh-aio-build`（ssh 凭据 `ssh`；`root` 与大写 `Admin` 均被拒），随后远程执行 `docker/build-dsh-aio-dev-amd64-internal.sh`。
+所有外部构件改走内网镜像，并把每一项参数化为 Dockerfile 构建参数、默认值即内网地址（`docker/dsh/Dockerfile.internal` 与 `docker/dsh-aio/Dockerfile.internal` 的 `NODE_IMAGE`、`NPM_REGISTRY`、`APT_MIRROR`、`JCLI_DOWNLOAD_BASE`；`DSH_IMAGE`/`CHROME_BASE_IMAGE` 在 `Dockerfile.dev` 中已是参数）。Jenkins（`new-jenkins.jereh.cn`，job `dsh-aio-dev-build`）用 `bitbucket` 凭据检出内网镜像库 `AI/deepseek-harness`，先把工作区 `.git/config` 换成干净版本（Jenkins git 插件会在其中写 `core.hooksPath=/dev/null`，仓库的 install-lefthook postinstall 在镜像内遇到它会拒装），经 tar-over-ssh 以 `admin` 用户同步到 10.1.17.58 的 `/opt/dsh-aio-build`（ssh 凭据 `ssh`；`root` 与大写 `Admin` 均被拒），打包后恢复原 config，随后远程执行 `docker/build-dsh-aio-dev-amd64-internal.sh`。
 
 镜像源选择（每一项都已在构建机实测贯通）：基础镜像取 `harbor.jereh.cn/base`（node:24 与 chrome 底座均已发布 amd64）；npm 走 `nexus.jereh.cn/repository/npm-public/`；apt 走新建的 Nexus **raw 格式**代理仓库 `apt-ubuntu-amd64`（清华源 ubuntu）与 `apt-ubuntu-ports-arm64`（ubuntu-ports）——raw 处理器放行 apt 处理器 502 的响应；jcli 发布包（v0.0.47，sha256 记录在运维日志）与 Chrome deb（amd64/arm64）走 MinIO 公开可读桶 `minio-api.jereh.cn/base/`。`apt-aliyun` 的上游已改指清华源以保持元数据兼容，但不再作为安装路径。
 

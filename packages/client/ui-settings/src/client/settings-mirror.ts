@@ -20,7 +20,11 @@ import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client
  */
 export type SettingsPersistence = 'host' | 'memory' | PrivatePlaneSource
 
-/** Whether a persistence mode may reach the settings RPCs right now. */
+/**
+ * Whether a persistence mode may reach the settings RPCs right now.
+ * @param persistence - the consumer's admitted-persistence source or constant.
+ * @returns whether settings reads and writes are admissible.
+ */
 export function persistenceAllows(persistence: SettingsPersistence): boolean {
   if (persistence === 'host') return true
   return persistence !== 'memory' && persistence.getSnapshot()

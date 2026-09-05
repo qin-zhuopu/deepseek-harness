@@ -45,6 +45,10 @@
 
 同机冒烟 job `dsh-aio-dev-smoke`：容器可运行，noVNC `:6080/vnc.html` → 200，`node --version` v24.19.0，Chrome 151.0.7922.137 在位。`:3080` 在 25 秒探测点尚未 listen（web 冷启动更慢，历史文档有同样记录），`chrome --version` 需用 `google-chrome` 命令名；冒烟脚本因这两处 exit 127、Jenkins 标红——属脚本表面问题，镜像本身是好的。
 
+## 流水线正式化
+
+流水线现在以 `Jenkinsfile` 的形态住在仓库根目录，job `dsh-aio-dev-build` 配置为 **Pipeline script from SCM**（Bitbucket `AI/deepseek-harness`、分支 `master`、凭据 `bitbucket`、脚本路径 `Jenkinsfile`）。改流水线就是一次提交一次推送，不再需要 Script Console 往返。推 harbor 的方式是带 `PUSH_HARBOR=true` 重跑 job（目标机 admin 用户需已有 `harbor.jereh.cn` 的 docker login——现状已具备）。
+
 ## 复用要点
 
 - Jenkins→10.1.17.58 的 SSH：用户 **admin**（root 与 Admin 均被拒），凭据 `ssh`，pipeline 用 `sshagent(credentials:['ssh'])`。

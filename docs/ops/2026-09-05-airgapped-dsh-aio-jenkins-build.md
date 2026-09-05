@@ -45,6 +45,10 @@ English | [中文](2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md)
 
 Smoke job `dsh-aio-dev-smoke` on the same host: container runs, noVNC `:6080/vnc.html` → 200, `node --version` v24.19.0, Chrome 151.0.7922.137 present. Web `:3080` was not yet listening at the 25s probe mark (web cold start is slower; historical docs record the same), and `chrome --version` needed the `google-chrome` name; the smoke script exits 127 on those two and Jenkins marks the run FAILURE — cosmetic, image itself is good.
 
+## Pipeline formalization
+
+The pipeline now lives in the repository root as `Jenkinsfile`, and job `dsh-aio-dev-build` is configured as **Pipeline script from SCM** (Bitbucket `AI/deepseek-harness`, branch `master`, credential `bitbucket`, script path `Jenkinsfile`). Editing the pipeline is a commit + push; no Script Console round-trips. Harbor pushes arrive by rerunning the job with `PUSH_HARBOR=true` (docker login for `harbor.jereh.cn` must exist on the target host's admin user — it does).
+
 ## Reusable facts
 
 - Jenkins→10.1.17.58 SSH: user **admin** (root and Admin are both rejected), credential `ssh`, pipeline wraps steps in `sshagent(credentials:['ssh'])`.

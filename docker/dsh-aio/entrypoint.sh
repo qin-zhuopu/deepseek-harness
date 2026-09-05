@@ -275,4 +275,18 @@ if [ "${DSH_IAM_GATE:-0}" = 1 ]; then
   log "IAM gate enabled (auth-iam patch overlay)"
 fi
 
-exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}"
+# Opt-in shared-password gate: DSH_AUTH_SECRET (>=32 chars) mounts the baked
+# auth-jwt overlay. Independent of the IAM gate below; both refuse to load on
+# a missing/short secret, so the container must not start on a half-mounted
+# gate — the check here keeps the failure a legible entrypoint log.
+GATE_ARGS=()
+if [ -n "${DSH_AUTH_SECRET:-}" ]; then
+  if [ "${#DSH_AUTH_SECRET}" -lt 32 ]; then
+    log "FATAL: DSH_AUTH_SECRET is shorter than 32 characters; refusing to start gated"
+    exit 1
+  fi
+  GATE_ARGS+=(--patch /root/.dsh/jwt-gate.cordis.patch.yml)
+  log "JWT gate enabled (auth-jwt patch overlay)"
+fi
+
+exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}" "${GATE_ARGS[@]}"

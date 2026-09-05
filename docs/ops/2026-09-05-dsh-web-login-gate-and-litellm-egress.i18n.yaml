@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/ops/2026-09-05-dsh-web-login-gate-and-litellm-egress.md
+2026-09-05-dsh-web-login-gate-and-litellm-egress.md: b991b78e87b46fa4a2190ca52321908d5433b92b
+2026-09-05-dsh-web-login-gate-and-litellm-egress.zh.md: 6fa95de18d1d999f7d320b9c9c9d7f44f7ad09aa

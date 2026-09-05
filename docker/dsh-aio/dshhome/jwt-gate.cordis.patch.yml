@@ -1,0 +1,12 @@
+# Opt-in shared-password gate for dsh web (enabled by entrypoint.sh when
+# DSH_AUTH_SECRET is set). The HS256 cookie is the whole session: the guard
+# 401s (navigations redirect to /login) until the built-in form accepts the
+# secret and issues the token, and the connection row's privileged-method pin
+# admits requests presenting it — so the settings/credentials plane opens for
+# the signed-in browser while a LAN page without the cookie stays locked out.
+# The secret arrives through the environment only; it never enters a repo file.
+- insert:
+    - id: auth-jwt
+      name: '@deepseek-ai/dsh-host-auth-jwt'
+      config:
+        secret: !!js 'process.env.DSH_AUTH_SECRET'

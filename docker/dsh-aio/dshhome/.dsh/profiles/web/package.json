@@ -1,7 +1,9 @@
 {
   "name": "dsh-profile-web",
   "private": true,
-  "dependencies": {},
+  "dependencies": {
+      "@deepseek-ai/dsh-host-auth-jwt": "workspace:^"
+    },
   "dsh": {
     "profile": {
       "bundles": [

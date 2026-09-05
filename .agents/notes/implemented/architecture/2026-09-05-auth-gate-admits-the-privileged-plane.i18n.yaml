@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-09-05-auth-gate-admits-the-privileged-plane.md
+2026-09-05-auth-gate-admits-the-privileged-plane.md: 8ef2c8ef63b47c2a9db10d94d403195bbed5cae0
+2026-09-05-auth-gate-admits-the-privileged-plane.zh.md: 55478794d9c1cb9cb39c397bb54d5f46a93f4c80

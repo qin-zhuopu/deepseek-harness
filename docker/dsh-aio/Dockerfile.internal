@@ -122,6 +122,8 @@ COPY --from=dshbuild /workspaces/deepseek-harness /workspaces/deepseek-harness
 COPY dshhome/.dsh /root/.dsh
 # Opt-in IAM gate overlay, added to the dsh web launch as --patch when DSH_IAM_GATE=1.
 COPY dshhome/iam-gate.cordis.patch.yml /root/.dsh/iam-gate.cordis.patch.yml
+# Opt-in shared-password gate overlay, added to the dsh web launch as --patch when DSH_AUTH_SECRET is set.
+COPY dshhome/jwt-gate.cordis.patch.yml /root/.dsh/jwt-gate.cordis.patch.yml
 
 # Supervisor that launches the whole stack.
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh

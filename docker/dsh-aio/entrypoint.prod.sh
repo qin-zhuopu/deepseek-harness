@@ -253,4 +253,16 @@ if [ "${DSH_IAM_GATE:-0}" = 1 ]; then
   log "IAM gate enabled (auth-iam patch overlay)"
 fi
 
-exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}"
+# Opt-in shared-password gate: DSH_AUTH_SECRET (>=32 chars) mounts the baked
+# auth-jwt overlay; the check keeps a misconfigured secret a legible log.
+GATE_ARGS=()
+if [ -n "${DSH_AUTH_SECRET:-}" ]; then
+  if [ "${#DSH_AUTH_SECRET}" -lt 32 ]; then
+    log "FATAL: DSH_AUTH_SECRET is shorter than 32 characters; refusing to start gated"
+    exit 1
+  fi
+  GATE_ARGS+=(--patch /root/.dsh/jwt-gate.cordis.patch.yml)
+  log "JWT gate enabled (auth-jwt patch overlay)"
+fi
+
+exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}" "${GATE_ARGS[@]}"

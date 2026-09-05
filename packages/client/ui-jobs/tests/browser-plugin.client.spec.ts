@@ -35,7 +35,7 @@ async function bench(): Promise<{ ctx: Context; fiber: ReturnType<Context['plugi
   ctx.provide('sessions', {})
   // The locale plugin binds a settings scope, which reads the connection handle
   // and the forwarded-event port.
-  ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+  ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   await ctx.plugin({ inject: localeInject, apply: applyLocale }).await()

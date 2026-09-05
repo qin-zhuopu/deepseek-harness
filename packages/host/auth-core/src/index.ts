@@ -12,7 +12,7 @@
  * @module @deepseek-ai/dsh-host-auth-core
  */
 
-import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http'
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
@@ -26,6 +26,8 @@ export const DEFAULT_COOKIE = 'dsh_token'
 export const DEFAULT_LOGIN_PATH = '/login'
 /** Default logout surface path. */
 export const DEFAULT_LOGOUT_PATH = '/logout'
+/** Path answering `{"authenticated":true}` for a request the guard admits. */
+export const DEFAULT_STATE_PATH = '/auth-state'
 
 /**
  * Resolve a server request URL against an internal origin; node:http always
@@ -41,12 +43,13 @@ export function requestUrl(req: IncomingMessage): URL {
 
 /**
  * Read one cookie's value from the request's Cookie header.
- * @param req - the request to inspect.
+ * @param req - the request to inspect (Node or Fetch).
  * @param cookieName - cookie name to look up.
  * @returns the cookie value, or undefined when absent or empty.
  */
-export function readCookie(req: IncomingMessage, cookieName: string): string | undefined {
-  return parseCookies(req.headers.cookie)[cookieName] || undefined
+export function readCookie(req: { headers: IncomingHttpHeaders | Headers }, cookieName: string): string | undefined {
+  const cookie = req.headers instanceof Headers ? req.headers.get('cookie') : req.headers.cookie
+  return parseCookies(typeof cookie === 'string' ? cookie : undefined)[cookieName] || undefined
 }
 
 function parseCookies(header: string | undefined): Record<string, string> {
@@ -62,12 +65,12 @@ function parseCookies(header: string | undefined): Record<string, string> {
  * Extract a presented token: `Authorization: Bearer <token>` wins over the
  * auth cookie (header is the explicit, cache-free channel; the cookie exists
  * for browser surfaces that cannot set headers).
- * @param req - the request being gated.
+ * @param req - the request being gated (Node or Fetch).
  * @param cookieName - configured cookie name.
  * @returns the compact JWT, or undefined when neither channel carries one.
  */
-export function presentedToken(req: IncomingMessage, cookieName: string): string | undefined {
-  const auth = req.headers.authorization
+export function presentedToken(req: { headers: IncomingHttpHeaders | Headers }, cookieName: string): string | undefined {
+  const auth = req.headers instanceof Headers ? req.headers.get('authorization') : req.headers.authorization
   if (typeof auth === 'string' && /^Bearer (.+)$/i.test(auth)) return auth.slice(7).trim() || undefined
   return readCookie(req, cookieName)
 }
@@ -218,6 +221,32 @@ export function decodeBase64UrlJson(segment: string): unknown {
   }
 }
 
+/**
+ * Admits requests into the authenticated plane: the named Cordis service
+ * (`authPrincipal`) the privileged surfaces consult to decide whether a
+ * request crossed this deployment's auth guard. The read is the guard's own
+ * token presentation — presence of a presented token, not its verification:
+ * a token that fails verification never reaches a consumer, because the
+ * guard answers the request with a 401 before the route handler runs.
+ */
+export class AuthPrincipal {
+  /**
+   * @param presentsToken - whether the request carries a token on a guard
+   * channel (Bearer header or the auth cookie), whatever gate verifies it.
+   * The Headers form lets the same face judge Fetch requests.
+   */
+  constructor(private readonly presentsToken: (req: { headers: IncomingHttpHeaders | Headers }) => boolean) {}
+
+  /**
+   * Whether a request presents the auth gate's credential.
+   * @param req - the request to inspect (Node or Fetch).
+   * @returns true when the request authenticates into the guarded surface.
+   */
+  isPrivate(req: { headers: IncomingHttpHeaders | Headers }): boolean {
+    return this.presentsToken(req)
+  }
+}
+
 /** Shared configuration of the guarded surface both auth plugins mount. */
 export interface AuthSurfaceOptions {
   /** Cookie cleared by the logout surface. */
@@ -276,4 +305,29 @@ export function mountAuthSurface(ctx: Context, options: AuthSurfaceOptions): voi
       headers: { 'www-authenticate': `Bearer realm="${REALM}"`, 'content-type': 'text/plain; charset=utf-8' },
     }
   }), 'auth-surface: upgrade guard')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: DEFAULT_STATE_PATH,
+    handler: (req, res) => {
+      if (req.method !== 'GET') {
+        res.writeHead(405)
+        res.end()
+        return
+      }
+      // The guard admitted this request only with a verified credential, so
+      // reaching the handler IS the admission verdict. The JSON body (not the
+      // status) carries it, so a page probing an unmounted gate — where the
+      // SPA fallback answers HTML with 200 — cannot mistake that for admission.
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ authenticated: true }))
+    },
+  }), 'auth-surface: state route')
+
+  // Provided on the mount fiber, not inside an effect: `provide()` returns a
+  // unit token rather than a disposer, and the service's lifetime is the
+  // mounting fiber's — the same lifetime as the guard registrations above.
+  ctx.provide('authPrincipal', new AuthPrincipal((req) => {
+    return presentedToken(req, cookieName) !== undefined
+  }))
 }

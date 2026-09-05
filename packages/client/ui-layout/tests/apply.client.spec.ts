@@ -26,7 +26,7 @@ async function bench() {
   // Theme registers its Appearance settings row and requires the connection
   // seam for persistence; model this bench as a remote, memory-only browser.
   ctx.provide('locale', new LocaleRuntime(ctx))
-  ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+  ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
   // ui-theme's Appearance row binds a durable scope through these two.
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)

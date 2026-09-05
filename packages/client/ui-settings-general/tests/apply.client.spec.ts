@@ -49,6 +49,7 @@ async function bench(isLoopback = true) {
   ctx.provide('connection', {
     api: { settings: { describe: settingsDescribe, openDocument: settingsOpenDocument } },
     isLoopback,
+    privatePlane: { getSnapshot: () => isLoopback, subscribe: () => () => {} },
   } as never)
   new TestRemote(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()

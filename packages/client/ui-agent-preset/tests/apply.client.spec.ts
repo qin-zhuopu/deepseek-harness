@@ -85,6 +85,10 @@ async function bench() {
   new TestRemote(ctx)
   const calls: string[] = []
   ctx.provide('connection', {
+    // The remote-browser plane source: this suite drives the settings mirror
+    // as an admitted page.
+    isLoopback: false,
+    privatePlane: { getSnapshot: () => true, subscribe: () => () => {} },
     api: {
       agentPresets: {
         list: () => { calls.push('list'); return Promise.resolve(ROSTER) },

@@ -24,7 +24,7 @@ describe('invariant companion', () => {
     expect(inject).toEqual(['slots', 'connection', 'remote', 'settingsScope'])
     const ctx = new Context()
     new SlotRegistry(ctx)
-    ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+    ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
     // The settings row's transport and the forwarded-event port.
     ctx.provide('remote', { $on: () => () => {} } as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)

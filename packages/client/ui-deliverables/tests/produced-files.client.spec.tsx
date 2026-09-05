@@ -464,6 +464,7 @@ describe('plugin registration', () => {
     ctx.provide('connection', {
       api: { settings: {} },
       isLoopback: false,
+      privatePlane: { getSnapshot: () => false, subscribe: () => () => {} },
       hostDescription,
     } as never)
     // ui-theme's Appearance row binds a durable scope through these two.

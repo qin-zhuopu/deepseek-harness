@@ -199,7 +199,7 @@ async function bench(snapshot = historySnapshot(NODES)) {
   // The locale plugin backs the locale-aware view tab label ('locale' in
   // inject); its settings scope needs a connection handle and the
   // forwarded-event port.
-  ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+  ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   ctx.plugin({ inject: [...localeInject], apply: localeApply })

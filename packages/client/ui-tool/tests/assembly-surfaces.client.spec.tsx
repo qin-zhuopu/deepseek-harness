@@ -71,6 +71,7 @@ async function bench(nodes: ToolResultNode[]) {
   runtime.provide('connection', {
     api: { settings: {} },
     isLoopback: false,
+    privatePlane: { getSnapshot: () => false, subscribe: () => () => {} },
     hostDescription: { getSnapshot: () => undefined, subscribe: () => () => {} },
   })
   // ui-theme's Appearance row binds a durable scope through these two.

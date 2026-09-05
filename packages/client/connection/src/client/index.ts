@@ -50,6 +50,20 @@ export interface HostDescriptionSource {
   subscribe(listener: () => void): () => void
 }
 
+/**
+ * Whether this browser is admitted to the Host's privileged plane. `true` for
+ * a loopback or fixture page (decided before the first paint) and for a remote
+ * page once the mounted auth gate confirms the page's credential; `false`
+ * while the page is anonymous. The verdict arrives asynchronously on a remote
+ * page, so consumers subscribe as well as read the snapshot.
+ */
+export interface PrivatePlaneSource {
+  /** Latest verdict; false until a remote page's admission answer lands. */
+  getSnapshot(): boolean
+  /** Subscribe to the verdict change from anonymous to admitted. */
+  subscribe(listener: () => void): () => void
+}
+
 /** Required services (none — this is the wire root). */
 export const inject: string[] = []
 
@@ -89,6 +103,8 @@ export interface ConnectionHandle {
   readonly isLoopback: boolean
   /** Generation-scoped Host facts, including the account home and native path-open capability. */
   readonly hostDescription: HostDescriptionSource
+  /** Whether the Host treats this browser as authenticated into its privileged plane. */
+  readonly privatePlane: PrivatePlaneSource
   /** Generic logical RPC channels over the same Connection transport. */
   readonly rpc: ClientConnectionRpc
   /**
@@ -127,14 +143,56 @@ export function apply(ctx: Context): void {
       }
     }
   }
+  // The privileged-plane verdict for this page: loopback (or non-browser) pages
+  // are admitted synchronously; a remote page learns its verdict from the auth
+  // gate's own surface (GET /auth-state, reachable only with a verified
+  // credential). The page itself can only be served to an admitted browser
+  // when a gate is mounted — the guard redirects unauthenticated navigations
+  // to the login — so no reload dance is needed: the probe answers on load.
+  const loopbackPage = pageLocation === undefined || isLoopbackHostname(pageLocation.hostname)
+  let planeAllowed = loopbackPage || fixture
+  const planeListeners = new Set<() => void>()
+  // The probe is the only writer and only runs while the plane is closed, so
+  // every publish is a real transition.
+  const publishPlane = (): void => {
+    planeAllowed = true
+    for (const listener of [...planeListeners]) {
+      try {
+        listener()
+      } catch (error) {
+        console.error('[web-runtime] private-plane listener threw:', error)
+      }
+    }
+  }
+  if (!planeAllowed) {
+    // The auth surface's own admission echo: a mounted gate answers
+    // {authenticated:true} only for a verified credential (its guard 401s
+    // everyone else), and with no gate mounted the path is unclaimed — the
+    // SPA fallback answers HTML and the JSON parse below refuses it. The
+    // literal path pairs with DEFAULT_STATE_PATH in dsh-host-auth-core.
+    void globalThis.fetch('/auth-state', { credentials: 'same-origin' })
+      .then(async (response) => {
+        if (!response.ok) return
+        const body = await response.json() as { authenticated?: unknown }
+        if (body.authenticated === true) publishPlane()
+      })
+      .catch(() => { /* anonymous page: stays out of the privileged plane */ })
+  }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    isLoopback: loopbackPage,
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {
         descriptionListeners.add(listener)
         return () => { descriptionListeners.delete(listener) }
+      },
+    },
+    privatePlane: {
+      getSnapshot: () => planeAllowed,
+      subscribe: (listener) => {
+        planeListeners.add(listener)
+        return () => { planeListeners.delete(listener) }
       },
     },
     rpc,

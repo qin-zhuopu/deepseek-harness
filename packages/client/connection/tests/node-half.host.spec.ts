@@ -75,7 +75,7 @@ function fakeResponse(): { response: ServerResponse; state: { status?: number; b
   return { response, state }
 }
 
-async function mounted(config?: { trustedHosts?: string[] }): Promise<{
+async function mounted(config?: { trustedHosts?: string[] }, services: Record<string, unknown> = {}): Promise<{
   routes: WebRoute[]
   upgrades: WebUpgradeRoute[]
   dispose: () => Promise<void>
@@ -85,6 +85,7 @@ async function mounted(config?: { trustedHosts?: string[] }): Promise<{
   const upgrades: WebUpgradeRoute[] = []
   ctx.provide('webServer', fakeHttpServer(routes, upgrades) as WebServer)
   ctx.provide('apiProxy', {} as unknown as ApiProxy)
+  for (const [name, value] of Object.entries(services)) ctx.provide(name, value as never)
   const fiber = ctx.plugin({ inject: [...inject], apply }, config)
   await fiber.await()
   return { routes, upgrades, dispose: () => fiber.dispose() }
@@ -194,7 +195,8 @@ describe('connection node half', () => {
     // configuration plane, reads included, plus the one method that makes the
     // host fetch a caller-chosen URL. The same declared authority reaches
     // ordinary reads (carrier-level 404 from the empty proxy proves the fence
-    // passed), but each privileged method stays loopback-only and 403s.
+    // passed), but each privileged method stays loopback-only without an auth
+    // gate and answers 401 — the sign-in signal the browser client reads.
     for (const method of [
       'host.pickDirectory', 'host.openPath',
       'settings.describe', 'settings.openDocument', 'settings.update', 'settings.replace', 'settings.mutate',
@@ -210,12 +212,49 @@ describe('connection node half', () => {
         fakeRequest({ host: 'harness.example' }, `${API_PATH}/${method}`),
         denied.response,
       )
-      expect(denied.state.status).toBe(403)
-      expect(denied.state.body).toBe('forbidden')
+      expect(denied.state.status).toBe(401)
+      expect(denied.state.body).toBe('unauthorized')
     }
     const read = fakeResponse()
     await routes[0]!.handler(fakeRequest({ host: 'harness.example' }), read.response)
-    expect(read.state.status).not.toBe(403)
+    expect(read.state.status).not.toBe(401)
+    await dispose()
+  })
+
+  it('admits privileged methods for a request the auth principal accepts', async () => {
+    const presented: string[] = []
+    const principal = { isPrivate: (req: { headers: Record<string, string> | Headers }) => {
+      const get = (name: string) => req.headers instanceof Headers
+        ? req.headers.get(name)
+        : req.headers[name]
+      presented.push(String(get('host')))
+      return get('authorization') === 'Bearer admitted'
+    } }
+    const { routes, dispose } = await mounted({ trustedHosts: ['harness.example'] }, { authPrincipal: principal })
+    // An admitted request passes the loopback pin: the empty proxy answers the
+    // carrier 404, proving the bridge ran.
+    const admitted = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: 'harness.example', authorization: 'Bearer admitted' }, `${API_PATH}/settings.describe`),
+      admitted.response,
+    )
+    expect(admitted.state.status).toBe(404)
+    // A request without the credential still answers the sign-in 401.
+    const denied = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: 'harness.example' }, `${API_PATH}/settings.describe`),
+      denied.response,
+    )
+    expect(denied.state.status).toBe(401)
+    expect(presented).toEqual(['harness.example', 'harness.example'])
+    // The prefix fence never consults the principal: authentication replaces
+    // loopback for the pin, not the deployment's own authority list.
+    const unlisted = fakeResponse()
+    await routes[0]!.handler(
+      fakeRequest({ host: 'elsewhere.example', authorization: 'Bearer admitted' }, `${API_PATH}/session.list`),
+      unlisted.response,
+    )
+    expect(unlisted.state.status).toBe(403)
     await dispose()
   })
 
@@ -479,7 +518,7 @@ describe('connection node half over a real HTTP server', () => {
     })
   }
 
-  it('answers a declared LAN authority with 403 on every configuration method, over real HTTP', async () => {
+  it('answers a declared LAN authority with 401 on every configuration method, over real HTTP', async () => {
     // The fence's input is a real IncomingMessage parsed by Node from the
     // wire, not a hand-assembled object: the Host header a LAN browser sends
     // is exactly what decides loopback-only here, so the boundary is asserted
@@ -498,7 +537,7 @@ describe('connection node half over a real HTTP server', () => {
         'llm.discoverModels',
         'agentPreset.read', 'agentPreset.copy', 'agentPreset.openDocument', 'agentPreset.remove',
       ]) {
-        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 403])
+        expect([method, await call(port, method, 'harness.example')]).toEqual([method, 401])
       }
       // The model catalog stays reachable for the same authority: a LAN
       // client's model picker needs it, and it carries no key or endpoint

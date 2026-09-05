@@ -54,7 +54,13 @@ async function bench(isLoopback = true) {
       result: { ok: true as const, value: namespace() },
     })
   })
-  ctx.provide('connection', { api: { settings: { describe, mutate } }, isLoopback } as never)
+  // A remote browser follows the privileged-plane verdict; the suite never
+  // flips it, so the stub answers the constructor-time state alone.
+  ctx.provide('connection', {
+    api: { settings: { describe, mutate } },
+    isLoopback,
+    privatePlane: { getSnapshot: () => isLoopback, subscribe: () => () => {} },
+  } as never)
   // The settings transport and the forwarded-event port the plugin injects.
   new TestRemote(ctx)
   await ctx.plugin({ inject: [...settingsInject], apply: settingsApply }).await()

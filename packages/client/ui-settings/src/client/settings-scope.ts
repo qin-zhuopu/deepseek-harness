@@ -34,7 +34,7 @@ import type {} from '@deepseek-ai/dsh-api-remotes/types'
 // cordis `Events` entry (and with it the branded `SettingsNamespace`).
 import type {} from '@deepseek-ai/dsh-settings/types'
 import type { SettingsSchemaService } from './schema.ts'
-import { SettingsDescribeMirror, type SettingsDescribeFace } from './settings-mirror.ts'
+import { SettingsDescribeMirror, persistenceAllows, type SettingsDescribeFace, type SettingsPersistence } from './settings-mirror.ts'
 
 type SettingsFace = Pick<IApiClient, 'settings'>
 
@@ -49,7 +49,7 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
   private tail: Promise<void> = Promise.resolve()
   private writeGeneration = 0
   private disposed = false
-  private readonly unsubscribe: (() => void) | undefined
+  private unsubscribe: (() => void) | undefined
   /**
    * Revision answered by a superseded write still ahead of the mirror: the
    * mirror only folds the LATEST settlement in, so a queued successor takes
@@ -61,29 +61,40 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
    * @param api - settings wire face (writes only; reads ride the mirror).
    * @param spec - namespace identity and optional narrowing decoder.
    * @param mirror - the shared describe mirror this scope derives from.
-   * @param persistence - remote browsers remain process-local because settings RPCs are loopback-only.
+   * @param persistence - what admits this browser to the settings RPCs: the
+   * privileged-plane source (a remote browser stays process-local until an
+   * auth gate admits it), a constant, or `host` for in-process transports.
    * @param schema - settings-owned schema operations.
    */
   constructor(
     private readonly api: SettingsFace,
     private readonly spec: SettingsScopeSpec<T>,
     private readonly mirror: SettingsDescribeMirror,
-    private readonly persistence: 'host' | 'memory',
+    private readonly persistence: SettingsPersistence,
     private readonly schema: SettingsSchemaService,
   ) {
+    const mayRead = persistenceAllows(persistence)
     this.store = createSnapshotStore<SettingsScopeSnapshot<T>>({
-      status: persistence === 'host' ? 'loading' : 'unavailable',
+      status: mayRead ? 'loading' : 'unavailable',
       value: undefined,
       base: undefined,
       user: undefined,
       revision: undefined,
       writable: false,
-      mode: persistence,
+      mode: mayRead ? 'host' : 'memory',
     })
-    if (persistence === 'host') {
-      this.unsubscribe = mirror.subscribe(() => { this.derive() })
-      this.derive()
-    }
+    // Deriving and write-gating read the live persistence verdict on every
+    // call, so a privileged-plane flip needs no re-construction: the mirror's
+    // snapshot changes (its `refreshPermission` starts the admission read)
+    // drive both the mode publication and the first derive.
+    this.watchMirror()
+  }
+
+  /** Derive now and follow the mirror's snapshot publications. */
+  private watchMirror(): void {
+    if (this.disposed || this.unsubscribe !== undefined) return
+    this.unsubscribe = this.mirror.subscribe(() => { this.derive() })
+    this.derive()
   }
 
   /** @returns the current sync snapshot (stable reference until the next change). */
@@ -170,7 +181,7 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
   }
 
   private enqueue(operation: () => Promise<void>): Promise<void> {
-    if (this.persistence === 'memory' || this.disposed) return Promise.resolve()
+    if (!persistenceAllows(this.persistence) || this.disposed) return Promise.resolve()
     const task = this.tail.then(async () => {
       if (this.disposed) return
       await operation()
@@ -183,13 +194,36 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
 
   private derive(): void {
     if (this.disposed) return
+    const mayRead = persistenceAllows(this.persistence)
     const mirrored = this.mirror.getSnapshot()
-    if (mirrored.view === undefined) return
+    if (!mayRead) {
+      // The browser is outside the privileged plane: the namespace stays
+      // process-local. A view held from before the flip keeps serving as the
+      // last-known value; the Host-side guards still own every write.
+      this.store.update((draft) => {
+        draft.mode = 'memory'
+        if (draft.value === undefined) draft.status = 'unavailable'
+        draft.writable = false
+      })
+      return
+    }
+    this.watchMirror()
+    if (mirrored.view === undefined) {
+      this.store.update((draft) => {
+        draft.mode = 'host'
+        // An `unavailable` status here is the process-local verdict left over
+        // from before the page entered the privileged plane; the read the
+        // admission started is what answers now.
+        if (draft.status === 'unavailable') draft.status = 'loading'
+      })
+      return
+    }
     const { writable } = mirrored.view
     const view = mirrored.view.namespaces.find(candidate => candidate.ns === this.spec.namespace)
     if (view === undefined) {
       this.store.update((draft) => {
         draft.status = 'unavailable'
+        draft.mode = 'host'
         draft.writable = writable
       })
       return
@@ -200,6 +234,7 @@ export class SettingsScopeController<T> implements SettingsScope<T> {
       draft.base = view.base
       draft.user = view.user
       draft.writable = writable
+      draft.mode = 'host'
       if (decoded === undefined) return
       draft.status = 'ready'
       draft.value = decoded
@@ -279,7 +314,7 @@ export class SettingsScopeBinder extends Service {
       connection.api,
       spec,
       this.mirror,
-      connection.isLoopback ? 'host' : 'memory',
+      connection.isLoopback ? 'host' : connection.privatePlane,
       this.schema,
     )
     ctx.effect(() => {

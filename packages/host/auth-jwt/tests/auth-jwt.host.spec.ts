@@ -258,6 +258,38 @@ describe('real Loader composition', () => {
     expect((await request(port, '/api/anything')).status).toBe(200)
   })
 
+  it('mounts the admission surfaces: state route and principal service', { timeout: 60_000 }, async () => {
+    const loaded = await loadComposition()
+    const port = loaded.webServer.port
+    // The client's privileged-plane probe: without a credential the guard
+    // 401s the probe path itself.
+    expect((await request(port, '/auth-state', API)).status).toBe(401)
+    const principal = loaded.get('authPrincipal') as { isPrivate(req: { headers: Headers | Record<string, string> }): boolean }
+    expect(principal).toBeDefined()
+    const login = await fetch(`http://127.0.0.1:${String(port)}/login`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-mode': 'cors' }, body: JSON.stringify({ password: SECRET }),
+    })
+    const { token } = await login.json() as { token: string }
+    // With the cookie the gate issued (the browser's own channel), the state
+    // route echoes the verdict as a JSON body, not just a 200.
+    const admitted = await fetch(`http://127.0.0.1:${String(port)}/auth-state`, { headers: { cookie: `${COOKIE}=${token}` } })
+    expect(admitted.status).toBe(200)
+    expect(admitted.headers.get('content-type')).toContain('application/json')
+    expect(await admitted.json()).toEqual({ authenticated: true })
+    // The echo is a read: any other method is refused without side effects.
+    const write = await fetch(`http://127.0.0.1:${String(port)}/auth-state`, { method: 'POST', headers: { cookie: `${COOKIE}=${token}` } })
+    expect(write.status).toBe(405)
+    await write.body?.cancel()
+    // The principal answers the presented credential on either channel.
+    expect(principal.isPrivate(new Request('http://dsh.internal/api/settings.describe', { headers: { authorization: `Bearer ${token}` } }))).toBe(true)
+    expect(principal.isPrivate(new Request('http://dsh.internal/api/settings.describe'))).toBe(false)
+    // HMR safety: disposing the auth fiber withdraws the service and the route.
+    const authFiber = [...loaded.loader.entries()].find(entry => entry.options.id === 'auth')?.fiber
+    await authFiber!.dispose()
+    expect(loaded.get('authPrincipal', false)).toBeUndefined()
+    expect((await request(port, '/auth-state', API)).status).toBe(404)
+  })
+
   it('rejects expired tokens and refuses a secret below the minimum', { timeout: 60_000 }, async () => {
     const loaded = await loadComposition()
     const port = loaded.webServer.port

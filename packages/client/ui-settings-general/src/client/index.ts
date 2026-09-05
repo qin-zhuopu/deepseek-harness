@@ -69,8 +69,11 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   const connection = ctx.get('connection') as ConnectionHandle
   // The action follows the shared describe mirror, whose owning plugin
-  // already refreshes it on document commits and reconnects.
-  const documentController = connection.isLoopback
+  // already refreshes it on document commits and reconnects; the same
+  // privileged-plane verdict gates durability, so an admitted remote page
+  // gets the action too (its first describe crosses the wire only on click).
+  const planeAllowed = connection.isLoopback || connection.privatePlane.getSnapshot()
+  const documentController = planeAllowed
     ? new SettingsDocumentStore(connection.api, ctx.settingsScope.describe())
     : undefined
   const documentInjected = documentController === undefined

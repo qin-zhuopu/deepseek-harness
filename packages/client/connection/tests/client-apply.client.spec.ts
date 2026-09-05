@@ -395,4 +395,78 @@ describe('connection client apply', () => {
     await expect(handle.rpc.call('/api', 'unknown/read', { args: { agentId: 'fx-alpha' } }))
       .rejects.toThrow(/endpoint.*unavailable/)
   })
+
+  it('keeps a loopback page in the privileged plane and never probes it', async () => {
+    ;(globalThis as Win).location = { hostname: 'localhost', search: '' }
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(''))
+    const handle = await mount()
+    expect(handle.privatePlane.getSnapshot()).toBe(true)
+    expect(fetch).not.toHaveBeenCalled()
+    fetch.mockRestore()
+  })
+
+  it('admits a remote page only on the auth surface\'s JSON verdict', async () => {
+    ;(globalThis as Win).location = { hostname: 'dsh.example', search: '' }
+    // The probe answers on load; the SPA fallback (HTML, not the verdict JSON)
+    // keeps the page out of the privileged plane.
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('<!doctype html>', { status: 200 }))
+    const fallbackPage = await mount()
+    await vi.waitFor(() => { expect(fetch).toHaveBeenCalledWith('/auth-state', { credentials: 'same-origin' }) })
+    await Promise.resolve()
+    expect(fallbackPage.privatePlane.getSnapshot()).toBe(false)
+    // A 401 from a mounted gate (unverified credential): no read of the body.
+    const denied = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('', { status: 401 }))
+    const deniedPage = await mount()
+    await vi.waitFor(() => { expect(denied).toHaveBeenCalled() })
+    expect(deniedPage.privatePlane.getSnapshot()).toBe(false)
+    denied.mockRestore()
+    // A transport failure (offline, aborted) leaves the plane closed silently.
+    const broken = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const brokenPage = await mount()
+    await vi.waitFor(() => { expect(broken).toHaveBeenCalled() })
+    expect(brokenPage.privatePlane.getSnapshot()).toBe(false)
+    expect(errorSpy).not.toHaveBeenCalled()
+    broken.mockRestore()
+    errorSpy.mockRestore()
+    // A verdict other than `authenticated: true` keeps the page out.
+    const other = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ authenticated: false }))
+    const otherPage = await mount()
+    await vi.waitFor(() => { expect(other).toHaveBeenCalled() })
+    expect(otherPage.privatePlane.getSnapshot()).toBe(false)
+    other.mockRestore()
+    // The gate's verdict on a fresh load admits the page and notifies the
+    // subscribers it had when the probe settled.
+    let settleAdmission!: (response: Response) => void
+    const admission = new Promise<Response>((resolve) => { settleAdmission = resolve })
+    const admitted = vi.spyOn(globalThis, 'fetch').mockReturnValue(admission)
+    const admittedPage = await mount()
+    const probe = vi.fn()
+    const off = admittedPage.privatePlane.subscribe(probe)
+    settleAdmission(Response.json({ authenticated: true }))
+    await vi.waitFor(() => { expect(admittedPage.privatePlane.getSnapshot()).toBe(true) })
+    expect(probe).toHaveBeenCalledTimes(1)
+    off()
+    expect(admittedPage.privatePlane.getSnapshot()).toBe(true)
+    admitted.mockRestore()
+  })
+
+  it('survives a private-plane subscriber that throws', async () => {
+    ;(globalThis as Win).location = { hostname: 'dsh.example', search: '' }
+    let settle!: (response: Response) => void
+    const pending = new Promise<Response>((resolve) => { settle = resolve })
+    vi.spyOn(globalThis, 'fetch').mockReturnValue(pending)
+    const handle = await mount()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const seen: string[] = []
+    handle.privatePlane.subscribe(() => { throw new Error('subscriber failed') })
+    handle.privatePlane.subscribe(() => { seen.push('admitted') })
+    settle(Response.json({ authenticated: true }))
+    await vi.waitFor(() => { expect(handle.privatePlane.getSnapshot()).toBe(true) })
+    expect(seen).toEqual(['admitted'])
+    expect(errorSpy).toHaveBeenCalledTimes(1)
+    expect(String(errorSpy.mock.calls[0]?.[1])).toContain('subscriber failed')
+    errorSpy.mockRestore()
+    vi.restoreAllMocks()
+  })
 })

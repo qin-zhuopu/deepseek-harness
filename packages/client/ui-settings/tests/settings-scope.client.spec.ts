@@ -362,6 +362,95 @@ describe('SettingsScopeController', () => {
     expect(mutate).not.toHaveBeenCalled()
   })
 
+  it('follows the privileged-plane source in both directions', async () => {
+    let allowed = false
+    const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 3))
+    const mutate = vi.fn().mockResolvedValue(ok(view({ preference: 'dark' }, 4)))
+    const wire = { settings: { describe: describeCall, mutate } } as never
+    const plane = { getSnapshot: () => allowed, subscribe: () => () => {} }
+    const mirror = new SettingsDescribeMirror(wire, plane)
+    const scope = new SettingsScopeController<UiTestSettings>(wire, { namespace: 'ui-test' }, mirror, plane, settingsSchema)
+    // Outside the plane: process-local, no wire, writes dropped.
+    expect(scope.getSnapshot()).toMatchObject({ status: 'unavailable', mode: 'memory', writable: false })
+    await scope.set('preference', 'dark')
+    expect(mutate).not.toHaveBeenCalled()
+    // Admission: the scope follows the mirror without re-construction; the
+    // admission read the caller started on the mirror lands the host view.
+    allowed = true
+    await mirror.refreshPermission()
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', mode: 'host', revision: 3, writable: true })
+    await scope.set('preference', 'light')
+    expect(mutate).toHaveBeenCalledTimes(1)
+    // The handle's verdict is monotonic (a reload re-decides), but a consumer
+    // rebuilt while denied keeps its process-local answer even after a view
+    // was once held: derive re-runs on every mirror publication.
+    await mirror.refreshPermission()
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', mode: 'host' })
+    expect(describeCall).toHaveBeenCalledTimes(2)
+    await scope.dispose()
+    // A scope constructed while the plane is closed never subscribes a write
+    // path through a stale host snapshot.
+    allowed = false
+    const deniedMirror = new SettingsDescribeMirror(wire, plane)
+    const deniedScope = new SettingsScopeController<UiTestSettings>(wire, { namespace: 'ui-test' }, deniedMirror, plane, settingsSchema)
+    expect(deniedScope.getSnapshot()).toMatchObject({ status: 'unavailable', mode: 'memory' })
+    await deniedScope.dispose()
+  })
+
+  it('passes the loading transition while the admission read is still open', async () => {
+    // Admission landed (mode flips to host, stale unavailable becomes
+    // loading) but the describe has not answered yet.
+    const gate = deferred<ReturnType<typeof described>>()
+    const wire = { settings: { describe: vi.fn().mockReturnValue(gate.promise), mutate: vi.fn() } } as never
+    let allowed = false
+    const plane = { getSnapshot: () => allowed, subscribe: () => () => {} }
+    const mirror = new SettingsDescribeMirror(wire, plane)
+    const scope = new SettingsScopeController<UiTestSettings>(wire, { namespace: 'ui-test' }, mirror, plane, settingsSchema)
+    allowed = true
+    const opening = mirror.refreshPermission()
+    // The admission read is in flight: mode flips to host and the stale
+    // unavailable status becomes loading while no view is held.
+    expect(scope.getSnapshot()).toMatchObject({ status: 'loading', mode: 'host', value: undefined })
+    gate.resolve(described({ preference: 'dark' }, 1))
+    await opening
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', revision: 1 })
+    // A host view without this namespace keeps the surface unavailable, but
+    // writable and host-mode now describe the live Host answer.
+    const other = vi.fn().mockResolvedValue(ok({ writable: true, hasDocument: true, namespaces: [] }))
+    const plainWire = { settings: { describe: other } } as never
+    const plainMirror = new SettingsDescribeMirror(plainWire)
+    const plainScope = new SettingsScopeController<UiTestSettings>(plainWire, { namespace: 'ui-test' }, plainMirror, 'host', settingsSchema)
+    await plainMirror.load()
+    expect(plainScope.getSnapshot()).toMatchObject({ status: 'unavailable', mode: 'host', writable: true })
+    // A scope disposed while denied never (re)subscribes: the early arm in
+    // derive and the watchMirror guard both see `disposed`.
+    await scope.dispose()
+    await plainScope.dispose()
+  })
+
+  it('keeps a pre-admission held value serving across a plane loss', async () => {
+    // The constructor admits: the first derive runs with no held view and no
+    // value yet, so the memory arm's held-value branch needs a value first.
+    const describeCall = vi.fn().mockResolvedValue(described({ preference: 'dark' }, 2))
+    const wire = { settings: { describe: describeCall, mutate: vi.fn() } } as never
+    let allowed = true
+    const plane = { getSnapshot: () => allowed, subscribe: () => () => {} }
+    const mirror = new SettingsDescribeMirror(wire, plane)
+    const scope = new SettingsScopeController<UiTestSettings>(wire, { namespace: 'ui-test' }, mirror, plane, settingsSchema)
+    await mirror.ensure()
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', mode: 'host', value: { preference: 'dark' } })
+    allowed = false
+    // A mirror publication while the plane is closed re-derives the memory
+    // arm; the held value keeps status ready (the last-known value serves).
+    mirror.acceptView(view({ preference: 'dark' }, 5))
+    expect(scope.getSnapshot()).toMatchObject({ status: 'ready', mode: 'memory', value: { preference: 'dark' }, writable: false })
+    // A scope constructed closed drops the arm before its first derive.
+    const coldScope = new SettingsScopeController<UiTestSettings>(wire, { namespace: 'ui-test' }, mirror, 'memory', settingsSchema)
+    await coldScope.dispose()
+    expect(coldScope.getSnapshot()).toMatchObject({ status: 'unavailable', mode: 'memory' })
+    await scope.dispose()
+  })
+
   it('carries the composition base and the user layer into the snapshot', async () => {
     const layered: SettingsNamespaceView = {
       ...view({ preference: 'dark' }, 3),
@@ -428,7 +517,7 @@ describe('SettingsScopeBinder.bind', () => {
     const wire = { settings: { describe: describeCall } }
     const mirror = new SettingsDescribeMirror(wire as never)
     const ctx = new Context()
-    ctx.provide('connection', { api: wire, isLoopback: true } as never)
+    ctx.provide('connection', { api: wire, isLoopback: true, privatePlane: { getSnapshot: () => true, subscribe: () => () => {} } } as never)
     let theme!: SettingsScope<UiTestSettings>
     let locale!: SettingsScope<UiTestSettings>
     new TestRemote(ctx)
@@ -457,7 +546,7 @@ describe('SettingsScopeBinder.bind', () => {
     const wire = { settings: { describe: describeCall } }
     const mirror = new SettingsDescribeMirror(wire as never, 'memory')
     const ctx = new Context()
-    ctx.provide('connection', { api: wire, isLoopback: false } as never)
+    ctx.provide('connection', { api: wire, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
     let scope!: SettingsScope<UiTestSettings>
     new TestRemote(ctx)
     await ctx.plugin(SettingsScopeBinder, { mirror, schema: settingsSchema }).await()

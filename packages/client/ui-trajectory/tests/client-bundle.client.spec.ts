@@ -85,7 +85,7 @@ describe('tsdown client artifact', () => {
     // the locale-aware view tab label (its settings scope needs a connection
     // handle and the Host-facing settings/remote seams).
     ctx.provide('sessions', { binding: () => undefined })
-    ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+    ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
     ctx.provide('remote', { $on: () => () => {} } as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
     const locale = await import('@deepseek-ai/dsh-client-locale/client')

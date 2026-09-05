@@ -9,8 +9,22 @@
  * through {@link SettingsDescribeMirror.acceptView}.
  */
 
-import type { IApiClient, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { IApiClient, PrivatePlaneSource, SettingsNamespaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+
+/**
+ * Persistence modes a consumer passes: `'host'` admits the wire reads
+ * unconditionally (fixture and in-process transports), `'memory'` pins the
+ * browser process-local, and a {@link PrivatePlaneSource} reads only while the
+ * page is in the privileged plane.
+ */
+export type SettingsPersistence = 'host' | 'memory' | PrivatePlaneSource
+
+/** Whether a persistence mode may reach the settings RPCs right now. */
+export function persistenceAllows(persistence: SettingsPersistence): boolean {
+  if (persistence === 'host') return true
+  return persistence !== 'memory' && persistence.getSnapshot()
+}
 
 type SettingsFace = Pick<IApiClient, 'settings'>
 
@@ -27,9 +41,10 @@ export interface SettingsDescribeView {
 /** Mirror state every derived settings surface renders from. */
 export interface SettingsMirrorSnapshot {
   /**
-   * `unavailable` is the terminal non-loopback state; `ready` persists across
-   * later failed refreshes (the held view keeps serving); `idle` means no
-   * answer is held and no read is running, so `ensure` will start one.
+   * `unavailable` means this browser stays out of the privileged plane (a
+   * remote page no auth gate has admitted); `ready` persists across later
+   * failed refreshes (the held view keeps serving); `idle` means no answer is
+   * held and no read is running, so `ensure` will start one.
    */
   status: 'idle' | 'loading' | 'ready' | 'unavailable'
   /** The last good answer; undefined until the first success. */
@@ -53,8 +68,8 @@ export interface SettingsDescribeFace {
    */
   subscribe(listener: () => void): () => void
   /**
-   * Resolve once an answer is held (or the mirror is terminally unavailable),
-   * reading only from `idle`.
+   * Resolve once an answer is held (or this browser stays out of the
+   * privileged plane), reading only from `idle`.
    * @returns settlement of the current or newly started read, if any.
    */
   ensure(): Promise<void>
@@ -79,14 +94,17 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
 
   /**
    * @param api - settings wire face.
-   * @param persistence - remote browsers stay process-local because settings RPCs are loopback-only.
+   * @param persistence - whether this browser may reach the settings RPCs: a
+   * constant (`'host'` for in-process transports, `'memory'` for a browser
+   * pinned process-local), or a {@link PrivatePlaneSource} whose verdict the
+   * mirror follows (a remote browser a later auth-gate admission flips).
    */
   constructor(
     private readonly api: SettingsFace,
-    private readonly persistence: 'host' | 'memory' = 'host',
+    private readonly persistence: SettingsPersistence = 'host',
   ) {
     this.store = createSnapshotStore<SettingsMirrorSnapshot>({
-      status: persistence === 'host' ? 'idle' : 'unavailable',
+      status: persistenceAllows(this.persistence) ? 'idle' : 'unavailable',
       view: undefined,
       error: null,
     })
@@ -107,12 +125,27 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
   }
 
   /**
+   * Re-open the mirror after the page entered the privileged plane: an
+   * `unavailable` snapshot becomes readable and starts the first Host read.
+   * A page that lost the permission keeps its last good view; the Host-side
+   * guards still refuse every call.
+   * @returns settlement of the freshness read, if one started.
+   */
+  refreshPermission(): Promise<void> {
+    if (!persistenceAllows(this.persistence)) return Promise.resolve()
+    if (this.store.getSnapshot().status === 'unavailable') {
+      this.store.set({ status: 'idle', view: undefined, error: null })
+    }
+    return this.load()
+  }
+
+  /**
    * Refresh from the Host. A call during an in-flight read marks one rerun
    * after it settles instead of racing a second wire read.
    * @returns settlement after this call's freshness is reflected.
    */
   load(): Promise<void> {
-    if (this.persistence === 'memory') return Promise.resolve()
+    if (!persistenceAllows(this.persistence)) return Promise.resolve()
     if (this.inFlight !== undefined) {
       this.rerun = true
       return this.inFlight
@@ -124,13 +157,13 @@ export class SettingsDescribeMirror implements SettingsDescribeFace {
   }
 
   /**
-   * Resolve once an answer is held (or the mirror is terminally unavailable),
-   * reading only from `idle`. The cheap idempotent entry for surfaces that
-   * render on first use.
+   * Resolve once an answer is held (or the browser stays out of the privileged
+   * plane), reading only from `idle`. The cheap idempotent entry for surfaces
+   * that render on first use.
    * @returns settlement of the current or newly started read, if any.
    */
   ensure(): Promise<void> {
-    if (this.persistence === 'memory') return Promise.resolve()
+    if (!persistenceAllows(this.persistence)) return Promise.resolve()
     if (this.inFlight !== undefined) return this.inFlight
     if (this.getSnapshot().status === 'idle') return this.load()
     return Promise.resolve()

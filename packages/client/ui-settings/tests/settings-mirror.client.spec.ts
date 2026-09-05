@@ -58,6 +58,7 @@ describe('SettingsDescribeMirror', () => {
     const describeCall = vi.fn()
       .mockResolvedValueOnce(described([view('theme', 2)]))
       .mockRejectedValueOnce(new Error('host gone'))
+      .mockRejectedValueOnce('string failure')
       .mockResolvedValueOnce(rejected('busy'))
     const mirror = new SettingsDescribeMirror({ settings: { describe: describeCall } } as never)
     await mirror.load()
@@ -65,6 +66,8 @@ describe('SettingsDescribeMirror', () => {
     await mirror.load()
     expect(mirror.getSnapshot()).toMatchObject({ status: 'ready', error: 'host gone' })
     expect(mirror.namespace('theme')?.revision).toBe(2)
+    await mirror.load()
+    expect(mirror.getSnapshot()).toMatchObject({ status: 'ready', error: 'string failure' })
     await mirror.load()
     expect(mirror.getSnapshot()).toMatchObject({ status: 'ready', error: 'busy' })
     expect(mirror.getSnapshot().view?.namespaces).toHaveLength(1)
@@ -91,13 +94,45 @@ describe('SettingsDescribeMirror', () => {
     expect(describeCall).toHaveBeenCalledTimes(1)
   })
 
-  it('memory persistence is terminally unavailable and never touches the wire', async () => {
+  it('memory persistence is unavailable and never touches the wire', async () => {
     const describeCall = vi.fn()
     const mirror = new SettingsDescribeMirror({ settings: { describe: describeCall } } as never, 'memory')
     await mirror.ensure()
     await mirror.load()
     expect(mirror.getSnapshot()).toEqual({ status: 'unavailable', view: undefined, error: null })
     expect(describeCall).not.toHaveBeenCalled()
+  })
+
+  it('a plane source follows admission flips in both directions', async () => {
+    let allowed = false
+    const describeCall = vi.fn().mockResolvedValue(described([view('theme', 1)]))
+    const mirror = new SettingsDescribeMirror(
+      { settings: { describe: describeCall } } as never,
+      { getSnapshot: () => allowed, subscribe: () => () => {} },
+    )
+    // Outside the plane: every door stays closed and the snapshot is terminal-shaped.
+    await mirror.ensure()
+    await mirror.load()
+    expect(mirror.getSnapshot().status).toBe('unavailable')
+    expect(describeCall).not.toHaveBeenCalled()
+    // Admission flips: the caller-driven refresh opens the door and reads once.
+    allowed = true
+    await mirror.refreshPermission()
+    expect(mirror.getSnapshot()).toMatchObject({ status: 'ready', error: null })
+    expect(describeCall).toHaveBeenCalledTimes(1)
+    // A later refresh while allowed keeps serving the held view.
+    await mirror.refreshPermission()
+    expect(describeCall).toHaveBeenCalledTimes(2)
+    // Losing the permission again: every door closes; the held view keeps
+    // serving, and ensure settles without a read.
+    allowed = false
+    await mirror.load()
+    await mirror.ensure()
+    expect(mirror.getSnapshot().status).toBe('ready')
+    expect(describeCall).toHaveBeenCalledTimes(2)
+    // refreshPermission with the door closed is a settled no-op.
+    await expect(mirror.refreshPermission()).resolves.toBeUndefined()
+    expect(describeCall).toHaveBeenCalledTimes(2)
   })
 
   it('acceptView folds one write answer into the held view without a wire read', async () => {

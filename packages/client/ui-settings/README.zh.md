@@ -15,5 +15,5 @@
 
 ## 已知限制与暂缓事项
 
-- **远程浏览器没有持久化设置**：设置 RPC 仅限 loopback，因此在非 loopback 浏览器中绑定的 scope 以 `unavailable` 起步且从不跨线路，它支撑的每一行在那里都是无效的。
+- **特权面之外的远程浏览器没有持久化设置**：设置 RPC 钉在 loopback 或认证门接纳之上，因此未被接纳的非 loopback 浏览器中绑定的 scope 以 `unavailable` 起步且从不跨线路，它支撑的每一行在那里都是无效的。之后的认证门接纳（connection handle 的 `privatePlane` 判定翻转）会打开镜像、把所有派生 scope 重新推导为 host 模式并发起首次读取，无需刷新页面。
 - **每次写入仅一个字段**：`set` 只发送单个 `set` op，因此需要同时改动两个字段的行没有事务可用，会发布两个 revision。

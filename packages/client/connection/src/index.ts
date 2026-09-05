@@ -7,7 +7,7 @@ import type { WebRoute, WebUpgradeRoute } from '@deepseek-ai/dsh-host-webserver'
 import { toFetchHandler } from '@deepseek-ai/dsh-host-apiproxy'
 import { API_PATH, HOST_EVENTS_PATH, MUX_EVENTS_PATH } from './api-path.ts'
 import { bridge, DEFAULT_MAX_REQUEST_BODY_BYTES } from './http-bridge.ts'
-import { assertTrustedAuthority, isTrustedApiRequest } from './api-request-trust.ts'
+import { assertTrustedAuthority, isTrustedApiRequest, readAuthPrincipal } from './api-request-trust.ts'
 import { HostConnectionService } from './rpc-host.ts'
 import { rejectWebSocketUpgrade, WebSocketDownlinks } from './websocket-downlink.ts'
 
@@ -123,7 +123,12 @@ const PRIVILEGED_METHODS = new Set([
  * the prefix passes the browser-trust fence first (DNS-rebinding and
  * cross-site defense — [api-request-trust](./api-request-trust.ts));
  * privileged methods additionally pass it with an empty trust list, which
- * pins them to loopback.
+ * pins them to loopback — or, when an auth plugin provides `authPrincipal`,
+ * to loopback and to requests presenting that gate's credential. The pin's
+ * loopback-only rule predates authentication; an admitted request is at
+ * least as trustworthy as the gate itself. The browser answer is the code
+ * the client treats as "sign in": the guard itself answers 401, so a 401
+ * here has exactly one cause — a request past the fence but not admitted.
  * @param ctx - Host plugin context.
  * @param config - resolved plugin config (schema defaults applied).
  */
@@ -144,8 +149,11 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
         : undefined
       if (method !== undefined
         && PRIVILEGED_METHODS.has(method)
-        && !isTrustedApiRequest(request, [])) {
-        return new Response('forbidden', { status: 403 })
+        && !isTrustedApiRequest(request, [], readAuthPrincipal(ctx))) {
+        return new Response('unauthorized', {
+          status: 401,
+          headers: { 'www-authenticate': 'Bearer realm="dsh"' },
+        })
       }
       if (request.method === 'GET' && (pathname === MUX_EVENTS_PATH || pathname === HOST_EVENTS_PATH)) {
         return new Response('upgrade required', {
@@ -162,6 +170,10 @@ export function apply(ctx: Context, config?: ConnectionConfig): void {
     kind: 'prefix',
     path: API_PATH,
     handler: async (req, res) => {
+      // The prefix fence stays the Host/Origin check without the principal:
+      // authentication substitutes for loopback only where loopback is the
+      // decision (the privileged-method pin inside the fetch handler), never
+      // for the deployment's own declared-authority list.
       if (!isTrustedApiRequest(req, trustedHosts)) {
         res.writeHead(403)
         res.end('forbidden')

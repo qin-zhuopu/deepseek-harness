@@ -15,5 +15,5 @@ None; this package neither assembles nor sends a provider request.
 
 ## Known Limitations and Deferred Work
 
-- **Remote browsers get no durable settings** — the settings RPCs are loopback-only, so a scope bound in a non-loopback browser starts `unavailable` and never crosses the wire; every row it backs is inert there.
+- **Remote browsers outside the privileged plane get no durable settings** — the settings RPCs stay pinned to loopback or an auth-gate admission, so a scope bound in an unadmitted non-loopback browser starts `unavailable` and never crosses the wire; every row it backs is inert there. A later gate admission (the connection handle's `privatePlane` verdict flipping) opens the mirror, re-derives every scope to host mode, and starts the first read without a reload.
 - **One field per write** — `set` sends a single `set` op, so a row that must move two fields together has no transaction and publishes two revisions.

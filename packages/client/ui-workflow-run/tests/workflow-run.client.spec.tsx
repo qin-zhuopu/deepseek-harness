@@ -842,7 +842,7 @@ describe('plugin lifecycle', () => {
   it('registers and removes the Definition and keyed renderer with its fiber', async () => {
     const ctx = new Context()
     await ctx.plugin(SlotRegistry).await()
-    ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+    ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
     ctx.provide('remote', { $on: () => () => {} } as never)
     ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
     await ctx.plugin(ConversationEventRegistry).await()

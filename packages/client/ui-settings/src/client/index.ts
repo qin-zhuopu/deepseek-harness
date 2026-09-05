@@ -49,14 +49,20 @@ export const inject = ['connection', 'remote']
 export function apply(ctx: ClientContext): void {
   const schema = new SettingsSchemaService(ctx)
   const connection = ctx.get('connection') as ConnectionHandle
+  // A loopback page's mirror is unconditionally host-backed and its verdict
+  // can never move; a remote page follows the privileged-plane source.
+  const plane = connection.isLoopback ? undefined : connection.privatePlane
   const mirror = new SettingsDescribeMirror(
     connection.api,
-    connection.isLoopback ? 'host' : 'memory',
+    plane ?? 'host',
   )
   ctx.effect(() => {
     const disposers = [
       (ctx.get('remote') as ClientContext['remote']).$on('settings/document-updated', () => { void mirror.load() }),
       ctx.on('connection/reset', () => { void mirror.load() }),
+      // The auth gate's admission verdict arrives after boot (probe response);
+      // a page that enters the privileged plane starts its first read now.
+      ...(plane === undefined ? [] : [plane.subscribe(() => { void mirror.refreshPermission() })]),
     ]
     // The first connection also emits connection/reset, so startup normally
     // costs two reads (budgeted in startup-rpc-budget.e2e.ts). The in-flight

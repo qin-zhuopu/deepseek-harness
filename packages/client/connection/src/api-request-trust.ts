@@ -9,16 +9,44 @@
  * still be a rebound browser read and Host is the one header rebinding cannot
  * forge. Non-browser and remote clients pass the same fence via loopback,
  * deployment-derived LAN IP literals, or a declared `trustedHosts` authority.
- * Network reachability and authentication stay out of scope: binding policy
- * belongs to the webserver config, and this fence is not an auth layer.
+ * Network reachability stays out of scope: binding policy belongs to the
+ * webserver config. Authentication is never performed here; an optional
+ * principal source only reports whether a deployment auth gate has already
+ * admitted the request, which satisfies a loopback-only decision the way a
+ * loopback socket does — the authenticated plane is the plane the gate
+ * protects.
  */
 
 import type { IncomingHttpHeaders } from 'node:http'
+import type { Context } from '@deepseek-ai/cordis'
 import { isLoopbackHostname } from './loopback-hostname.ts'
 
 /** The request facts the fence reads from either HTTP representation. */
 interface ApiTrustRequest {
   headers: IncomingHttpHeaders | Headers
+}
+
+/**
+ * The deployed auth gate's admission face (service `authPrincipal`): whether a
+ * request presents the credential the gate's guard verifies.
+ * `@deepseek-ai/dsh-host-auth-core` supplies the implementation; the fence
+ * only reads the verdict. The narrow member keeps the fence open to any HTTP
+ * request representation it already accepts.
+ */
+export interface PrivateRequestPrincipal {
+  /** @param req - request (Node or Fetch) to inspect for a presented credential. */
+  isPrivate(req: { headers: IncomingHttpHeaders | Headers }): boolean
+}
+
+/**
+ * Read the optional `authPrincipal` service. The strict property proxy would
+ * throw while no auth plugin is mounted (the default deployment), so the
+ * lenient global-store read is the only safe access.
+ * @param ctx - the reading plugin's context.
+ * @returns the admission face, or undefined when no gate is mounted.
+ */
+export function readAuthPrincipal(ctx: Context): PrivateRequestPrincipal | undefined {
+  return ctx.get('authPrincipal', false) as PrivateRequestPrincipal | undefined
 }
 
 function header(headers: IncomingHttpHeaders | Headers, name: string): string | undefined {
@@ -91,21 +119,34 @@ function isTrustedAuthority(hostUrl: URL, trustedHosts: readonly string[]): bool
  * Decide whether one /api request may reach the RPC bridge.
  * @param request - Node HTTP or Fetch request facts (headers).
  * @param trustedHosts - non-loopback authorities this deployment serves: exact `host:port`, or port-less `host` matching any port.
+ * @param principal - the deployed auth gate's admission face, absent when no
+ * gate is mounted; a request it admits passes a loopback-only decision
+ * (empty `trustedHosts`) like a loopback socket does.
  * @returns true when the Host is ours (loopback or trusted) and any attached browser markers are same-origin.
  */
-export function isTrustedApiRequest(request: ApiTrustRequest, trustedHosts: readonly string[]): boolean {
+export function isTrustedApiRequest(
+  request: ApiTrustRequest,
+  trustedHosts: readonly string[],
+  principal?: PrivateRequestPrincipal,
+): boolean {
   // Host fence (DNS-rebinding defense), applied to every request: the browser
   // fills Host from the URL it believes it is talking to, so a rebound page
   // carries the attacker's domain here even though the socket lands on this
   // server. There is no marker shortcut — a browser read over plain HTTP
   // (images and navigations) arrives with neither Origin nor
   // Fetch-Metadata, indistinguishable from curl, and its response is readable
-  // by the rebound page.
+  // by the rebound page. A gate-admitted request is exempt from this host
+  // comparison: its Bearer header or auth cookie was verified by the guard
+  // (or its 401 was answered by that guard before the route ran), and neither
+  // a rebounded nor any cross-site page carries that cookie — authentication
+  // replaces the Host evidence rather than adding to it.
   const host = header(request.headers, 'host')
   if (host === undefined) return false
   const hostUrl = parseAuthority(host)
   if (hostUrl === undefined) return false
-  if (!isLoopbackHostname(hostUrl.hostname) && !isTrustedAuthority(hostUrl, trustedHosts)) return false
+  if (principal?.isPrivate(request) !== true
+    && !isLoopbackHostname(hostUrl.hostname)
+    && !isTrustedAuthority(hostUrl, trustedHosts)) return false
   // Cross-site fence: modern browsers label the initiator relationship on
   // every fetch; an explicit cross-site marker is refused regardless of Origin.
   if (header(request.headers, 'sec-fetch-site') === 'cross-site') return false

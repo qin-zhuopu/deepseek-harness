@@ -68,7 +68,7 @@ async function fullBench(sessions: SessionSummary[]) {
   const ctx = new Context()
   const face = sessionsWith(sessions)
   ctx.provide('sessions', face)
-  ctx.provide('connection', { api: { settings: {} }, isLoopback: false } as never)
+  ctx.provide('connection', { api: { settings: {} }, isLoopback: false, privatePlane: { getSnapshot: () => false, subscribe: () => () => {} } } as never)
   ctx.provide('remote', { $on: () => () => {} } as never)
   ctx.provide('settingsScope', { bind: () => stubSettingsScope().scope } as never)
   await provideSlotFaces(ctx)

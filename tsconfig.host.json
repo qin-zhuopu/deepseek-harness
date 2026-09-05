@@ -300,6 +300,7 @@
     { "path": "./packages/host/directory-picker-browse" },
     { "path": "./packages/host/directory-picker-native" },
     { "path": "./packages/host/frontend-static" },
+    { "path": "./packages/host/auth-jwt" },
     { "path": "./packages/host/plugin-inventory" },
     { "path": "./packages/host/webserver" },
     { "path": "./packages/sdk/client" },

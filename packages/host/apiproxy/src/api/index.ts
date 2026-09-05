@@ -42,7 +42,9 @@ export interface ApiProxy {
   /**
    * Prepare the fixed workspace root and mirror its child directories into the
    * registry, then watch it for live changes. Not a domain method; the gateway
-   * plugin drives it once at startup. Returns a disposer that stops the watcher.
+   * plugin drives it once at startup.
+   * @param signal - abort that also stops the watcher.
+   * @returns disposer that stops the watcher and unwinds preparation.
    */
   initWorkspaceRoot(signal?: AbortSignal): Promise<() => void>
 }

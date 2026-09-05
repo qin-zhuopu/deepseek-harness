@@ -55,6 +55,37 @@ export interface WebUpgradeRoute {
   handler: (req: IncomingMessage, socket: Duplex, head: Buffer) => void | Promise<void>
 }
 
+/** Which surface of the request pipeline a {@link WebGuard} verdict covers: a matched named route, or the fallback seat. */
+export type WebGuardSurface = 'route' | 'fallback'
+
+/**
+ * Gate consulted ahead of every named route and of the fallback handler
+ * (never the bare 404 for an unclaimed fallback), in registration order.
+ * The first rejection stops the chain and its response is the guard's to
+ * own: an unwritten denial gets an empty 401. Guards carry no harness
+ * concepts; an auth plugin uses the surface to gate routes hard while
+ * handling the static shell (redirecting or passing it through) so a login
+ * page stays reachable.
+ */
+export type WebGuard = (
+  req: IncomingMessage,
+  res: ServerResponse,
+  surface: WebGuardSurface,
+) => boolean | Promise<boolean>
+
+/**
+ * Gate consulted before any registered upgrade route runs — the auth seam
+ * for WebSocket traffic, which has no response object to write. Guards are
+ * consulted before the route table lookup, so a rejected connection never
+ * reveals whether the pathname has an owner. A rejecting verdict carries the
+ * rejection's status and optional headers; the carrier writes the rejection
+ * response on the pending upgrade and destroys the socket.
+ */
+export type UpgradeGuard = (req: IncomingMessage) => UpgradeGuardVerdict | Promise<UpgradeGuardVerdict>
+
+/** Allow (`true`) or reject (status plus optional response headers) one upgrade. */
+export type UpgradeGuardVerdict = true | { status: number; headers?: Record<string, string> }
+
 /** Gateway config: the listen address. */
 export interface Config {
   /** Listen host; the two supported values are loopback and all-interfaces. */
@@ -79,6 +110,8 @@ export class WebServer extends Service {
   private readonly exact = new Map<string, WebRoute>()
   private readonly prefixes = new Map<string, WebRoute>()
   private readonly upgrades = new Map<string, WebUpgradeRoute>()
+  private readonly upgradeGuards = new Set<UpgradeGuard>()
+  private readonly guards = new Set<WebGuard>()
   private readonly upgradedSockets = new Set<Duplex>()
   private readonly indexTaps: ((html: string) => string)[] = []
   private fallback: WebRoute['handler'] | undefined
@@ -145,6 +178,34 @@ export class WebServer extends Service {
   }
 
   /**
+   * Register an HTTP guard: a gate consulted (in registration order) before
+   * every named route and before the fallback handler, told which surface
+   * the request took. The first rejection stops the chain and owns its
+   * response; an unwritten denial gets an empty 401. A request matching no
+   * route while the fallback seat is unclaimed is the bare 404 and sees no
+   * guard.
+   * @param guard - allow/deny decision, surfaced as 'route' or 'fallback'.
+   * @returns the disposer removing the guard.
+   */
+  registerGuard(guard: WebGuard): () => void {
+    this.guards.add(guard)
+    return () => { this.guards.delete(guard) }
+  }
+
+  /**
+   * Register an upgrade guard: a pre-protocol gate consulted (ahead of the
+   * upgrade route table, in registration order) for every HTTP upgrade. A
+   * rejecting verdict answers the pending upgrade itself and the carrier
+   * destroys the socket.
+   * @param guard - allow/deny decision with the rejection's status/headers.
+   * @returns the disposer removing the guard.
+   */
+  registerUpgradeGuard(guard: UpgradeGuard): () => void {
+    this.upgradeGuards.add(guard)
+    return () => { this.upgradeGuards.delete(guard) }
+  }
+
+  /**
    * Register a raw-HTML index transform, the escape hatch for markup no
    * {@link IndexInjection} row expresses: {@link renderIndex} applies taps in
    * registration order after rendering the structured rows.
@@ -165,9 +226,24 @@ export class WebServer extends Service {
       /* v8 ignore next -- `?? '/'` arm: node:http always sets url on server
       requests; the field is only optional on the client-side IncomingMessage type */
       const rawPath = new URL(req.url ?? '/', 'http://x').pathname
+      // Guards run in registration order before the matched handler; the
+      // first rejection stops the chain, owning its response (an unwritten
+      // denial gets an empty 401). A request matching no route and no
+      // fallback owner stays a bare 404: there is nothing to gate.
+      const allow = async (surface: WebGuardSurface): Promise<boolean> => {
+        for (const guard of this.guards) {
+          if (await guard(req, res, surface)) continue
+          if (!res.headersSent) {
+            res.writeHead(401)
+            res.end()
+          }
+          return false
+        }
+        return true
+      }
       const route = this.match(rawPath)
       if (route !== undefined) {
-        await route.handler(req, res)
+        if (await allow('route')) await route.handler(req, res)
         return
       }
       const fallback = this.fallback
@@ -176,7 +252,7 @@ export class WebServer extends Service {
         res.end()
         return
       }
-      await fallback(req, res)
+      if (await allow('fallback')) await fallback(req, res)
     }
     // Last-resort guard: handle() rejecting would otherwise be an unhandled
     // rejection killing the process on one malformed request (bad %-escape,
@@ -203,29 +279,44 @@ export class WebServer extends Service {
         socket.off('error', onError)
         this.upgradedSockets.delete(socket)
       })
-      let route: WebUpgradeRoute | undefined
+      let pathname: string
       try {
         /* v8 ignore next -- node:http always sets url on server requests. */
-        route = this.upgrades.get(new URL(req.url ?? '/', 'http://x').pathname)
+        pathname = new URL(req.url ?? '/', 'http://x').pathname
       } catch (error) {
         this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
         socket.destroy()
         return
       }
-      if (route === undefined) {
-        socket.destroy()
-        return
-      }
-      this.upgradedSockets.add(socket)
-      try {
-        Promise.resolve(route.handler(req, socket, head)).catch((error: unknown) => {
-          this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
+      // Guards run ahead of the route table so a rejected connection never
+      // reveals whether the pathname has an owner.
+      const gate = async (): Promise<void> => {
+        for (const guard of this.upgradeGuards) {
+          const verdict = await guard(req)
+          if (verdict === true) continue
+          const { status, headers } = verdict
+          socket.end([
+            `HTTP/1.1 ${String(status)}`,
+            'Connection: close',
+            'Content-Length: 0',
+            ...Object.entries(headers ?? {}).map(([name, value]) => `${name}: ${value}`),
+            '',
+            '',
+          ].join('\r\n'))
+          return
+        }
+        const route = this.upgrades.get(pathname)
+        if (route === undefined) {
           socket.destroy()
-        })
-      } catch (error) {
+          return
+        }
+        this.upgradedSockets.add(socket)
+        await route.handler(req, socket, head)
+      }
+      gate().catch((error: unknown) => {
         this.ctx.logger.warn(error instanceof Error ? error : new Error(String(error)))
         socket.destroy()
-      }
+      })
     })
 
     await new Promise<void>((resolve, reject) => {

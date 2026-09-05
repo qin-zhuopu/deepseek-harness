@@ -23,6 +23,11 @@ ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
 
 FROM ${NODE_IMAGE}
 
+# Re-declare after FROM: ARGs declared before the first FROM are not visible
+# inside the stage, and an unset expansion would silently empty the ENV below
+# and send corepack back to registry.npmjs.org.
+ARG NPM_REGISTRY
+
 # ── corepack + pnpm (pinned by repo), fetched through the configured registry ──
 ENV COREPACK_NPM_REGISTRY=${NPM_REGISTRY}
 ENV COREPACK_INTEGRITY_KEYS=0

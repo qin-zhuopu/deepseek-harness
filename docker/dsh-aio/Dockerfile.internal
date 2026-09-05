@@ -85,10 +85,10 @@ RUN set -eux; \
 
 # 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。
 # 依赖上面 apt 层提供的 curl；按 dpkg 架构自动选择 amd64/arm64 发布包。
-# JCLI_DOWNLOAD_BASE 默认指向公网 GitHub Release；气隙主机须像重定向 apt/npm 一样，
-# 传入内网镜像 URL 才能取到 jcli 发布包。
+# JCLI_DOWNLOAD_BASE 默认指向 MinIO 公开桶里的 v0.0.47 发布包（气隙主机同样可达）；
+# 公网构建机可覆盖为 GitHub Release 的下载路径。
 # 凭据不写入镜像：运行时由用户在 ~/.jenkins-cli.yaml 提供（由 /root 具名卷持久化）。
-ARG JCLI_DOWNLOAD_BASE=https://github.com/jenkins-zh/jenkins-cli/releases/latest/download
+ARG JCLI_DOWNLOAD_BASE=https://minio-api.jereh.cn/base/jcli/v0.0.47
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     case "$arch" in \

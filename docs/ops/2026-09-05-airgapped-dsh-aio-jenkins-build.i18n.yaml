@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md
-2026-09-05-airgapped-dsh-aio-jenkins-build.md: 84e1046b7b8e07e323855af7132f33f871bbb4cc
-2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md: 4dc259dd0f952090e08112dc3962feeb62a59b12
+2026-09-05-airgapped-dsh-aio-jenkins-build.md: 2844de47982ffca4f4a3f801aa1e746803fca734
+2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md: 8d6f700af55f954c75a294a0191a882cb6dcfc46

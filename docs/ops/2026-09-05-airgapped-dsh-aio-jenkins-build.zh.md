@@ -68,6 +68,16 @@ job 的 config.xml 里 `CpsScmFlowDefinition` 必须嵌经典的 `hudson.plugins
 - 端到端验证：`GET /` 200、`/vnc/vnc.html` 200、Host+Origin 为 `dsh.jereh-pe.cn` 的 `POST /api/workspace.list` 200（声明过的主机名通过信任栅栏）、HTTPS 000（该代理无证书——仅 HTTP）。
 - 该 vhost 没有鉴权；与 0005 同样的提醒：能触达代理的人就能触达一个 dsh 控制面。
 
+## 新容器打开在 deepseek-harness 而不是系统管理
+
+症状：新容器侧边栏只有 **deepseek-harness**（`/workspaces/deepseek-harness`），预期的种子工作区 **系统管理**（`/workspaces/system-admin`）不见了。三个原因叠加：
+
+1. 种子（`api-proxy.ts` 的 `WORKSPACE_ROOT_SEED_NAME='system-admin'`，标题「系统管理」）只在 `initWorkspaceRoot` 时 `/workspaces` **为空**才会创建。dev 镜像的 `WORKDIR /workspaces/deepseek-harness`（`docker/dsh/Dockerfile.internal`）预先占了根目录，种子因此被跳过。
+2. `entrypoint.sh` 预注册的是 `INIT_WORKSPACE=/root/workspace`，在 `/workspaces` 路径规则之外——`workspace.create` 直接拒绝（`ENOENT realpath`，而且根监视器也不会镜像它）。就是日志里那条 `workspace registration ... failed (non-fatal)`。
+3. 唯一还能注册种子工作区的路径存在竞态：entrypoint 以 `GET /` 返回 200 为门，但静态载体在 RPC 网关挂上 `/api/*` 之前就会应答，所以即使默认值已改成 `/workspaces/system-admin`，单次 POST 仍然失败。
+
+修复（`290dedc75f`、`2a3367f7e9`）：dev 与 prod entrypoint 的 `INIT_WORKSPACE` 默认值改为 `/workspaces/system-admin`——与主机侧种子一致，`reconcileWorkspaceRoot` 会以其标题「系统管理」收养该目录；注册循环改为对幂等的 create POST 重试至多 60 秒。线上容器的热修：`docker exec dsh-aio mkdir -p /workspaces/system-admin`——根监视器数秒内收养（`workspace.list` 随后返回 系统管理 + deepseek-harness；dev 镜像按设计保留源码树工作区用于热更新）。
+
 ## 复用要点
 
 - Jenkins→10.1.17.58 的 SSH：用户 **admin**（root 与 Admin 均被拒），凭据 `ssh`，pipeline 用 `sshagent(credentials:['ssh'])`。

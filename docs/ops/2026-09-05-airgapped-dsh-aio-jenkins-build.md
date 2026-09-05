@@ -68,6 +68,16 @@ The wildcard `*.jereh-pe.cn` resolves to 17.58, where `jr-nginx-proxy` runs on t
 - Verified end to end: `GET /` 200, `/vnc/vnc.html` 200, `POST /api/workspace.list` with Host+Origin `dsh.jereh-pe.cn` 200 (trust fence passes on the declared authority), HTTPS 000 (no cert on this proxy — HTTP only).
 - The vhost is unauthenticated; same note as 0005: anyone reaching the proxy reaches a dsh control plane.
 
+## The fresh container opened on deepseek-harness instead of 系统管理
+
+Symptom: a brand-new container's sidebar showed only **deepseek-harness** (`/workspaces/deepseek-harness`), where the expected seeded workspace **系统管理** (`/workspaces/system-admin`) was missing. Three compounding causes:
+
+1. The seed (`api-proxy.ts` `WORKSPACE_ROOT_SEED_NAME='system-admin'`, title 系统管理) is only minted when `/workspaces` is **empty** at `initWorkspaceRoot`. The dev image `WORKDIR /workspaces/deepseek-harness` (`docker/dsh/Dockerfile.internal`) pre-populates the root, so the seed was skipped.
+2. `entrypoint.sh` pre-registered `INIT_WORKSPACE=/root/workspace`, outside the `/workspaces` path rule — `workspace.create` rejects it (`ENOENT realpath`, and it would not have been mirrored by the root watcher either). That was the logged `workspace registration ... failed (non-fatal)`.
+3. The one place that could still register the seeded workspace raced: the entrypoint gates on `GET /` returning 200, but the static carrier answers before the RPC gateway mounts `/api/*`, so the single-shot create POST failed even after the default was corrected to `/workspaces/system-admin`.
+
+Fixes (`290dedc75f`, `2a3367f7e9`): `INIT_WORKSPACE` defaults to `/workspaces/system-admin` in dev and prod entrypoints — matching the host seed, so `reconcileWorkspaceRoot` adopts it with title 系统管理; the registration loop retries the idempotent create POST for up to 60s. Hot patch on the live container: `docker exec dsh-aio mkdir -p /workspaces/system-admin` — the root watcher adopted it within seconds (`workspace.list` then returned 系统管理 + deepseek-harness; the dev image keeps the source-tree workspace by design for hot-reload).
+
 ## Reusable facts
 
 - Jenkins→10.1.17.58 SSH: user **admin** (root and Admin are both rejected), credential `ssh`, pipeline wraps steps in `sshagent(credentials:['ssh'])`.

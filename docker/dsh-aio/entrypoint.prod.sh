@@ -23,8 +23,11 @@ set -e
 : "${BIND_ADDR:=127.0.0.1}"
 # Directory pre-registered as a workspace once dsh web is up, so a fresh
 # container opens with a ready workspace instead of an empty picker. Set
-# INIT_WORKSPACE= (empty) to skip.
-: "${INIT_WORKSPACE:=/root/workspace}"
+# INIT_WORKSPACE= (empty) to skip. It lives under the mirrored /workspaces
+# root and matches the host-side seed (system-admin / 系统管理), so a fresh
+# container shows that workspace alone; /root/workspace would have been
+# rejected by the /workspaces path rule anyway and only logged a failure.
+: "${INIT_WORKSPACE:=/workspaces/system-admin}"
 # --- Reverse-proxy support -------------------------------------------------
 # By default every URL the browser uses points at 127.0.0.1 (ports published
 # straight to the host). Behind a reverse proxy (nginx-proxy et al) the

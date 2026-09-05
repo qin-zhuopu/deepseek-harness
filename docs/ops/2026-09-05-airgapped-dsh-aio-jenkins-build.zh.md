@@ -53,6 +53,11 @@ job 的 config.xml 里 `CpsScmFlowDefinition` 必须嵌经典的 `hudson.plugins
 
 构建 #23 是完全由仓库 Jenkinsfile 驱动的首跑：SUCCESS，1353 秒，`PUSH_HARBOR=true`，发布 `harbor.jereh.cn/base/dsh:dev-amd64`、`base/dsh-aio:dev-amd64`、`base/dsh-aio:dev-amd64-13de9a67`（经 harbor v2 tags API 验证）。
 
+## 镜像运行时冒烟（10.1.17.58）
+
+- 首次 harbor 冒烟：容器可运行，noVNC 200，node/Chrome 在位，但 **`dsh web` 始终没有监听**（先 180 秒、后 14 分钟观察窗）。用 `bash -x` 定位根因：entrypoint fork 了 `pnpm dev:web --poll` 后立刻 `exec pnpm dsh web`；dev:web 首轮冷构建要在烘焙产物之上重写 `apps/web/dist`，vite 阶段会把该目录留成半成品好几分钟——web 对着半成品的 bundle 树启动，监听之前就死了。entrypoint.sh 已修复：watch 构建退出（或到 25 分钟上限）且 `apps/web/dist/index.html` 静默 5 秒后才启动 web。重建为 #24（SUCCESS，harbor 已重新推送）。
+- 主机怪癖，与 `docs/ops/2026-09-01` 在 crun 主机记录的一致：在 17.58（CentOS 7，docker 20.10.8/runc）上直接 `docker run -d` 会让 PID1 在启动中途被冻结——entrypoint 日志停在 autocutsel/noVNC 一步，之后的全没跑。用仓库已记录的绕法（`--entrypoint bash … -c 'sleep 60000'` + `docker exec -d … /usr/local/bin/entrypoint.sh`）全栈正常拉起，修复版镜像 **t=45s web 返回 200**。该主机上的部署必须走两步启动；entrypoint-as-PID1 在其它部署主机是正常的。
+
 ## 复用要点
 
 - Jenkins→10.1.17.58 的 SSH：用户 **admin**（root 与 Admin 均被拒），凭据 `ssh`，pipeline 用 `sshagent(credentials:['ssh'])`。

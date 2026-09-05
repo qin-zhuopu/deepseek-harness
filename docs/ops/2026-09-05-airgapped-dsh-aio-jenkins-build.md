@@ -53,6 +53,11 @@ The job config.xml must embed a classic `hudson.plugins.git.GitSCM` inside `CpsS
 
 Build #23 was the first run driven entirely by the repository Jenkinsfile: SUCCESS in 1353s with `PUSH_HARBOR=true`, publishing `harbor.jereh.cn/base/dsh:dev-amd64`, `base/dsh-aio:dev-amd64`, and `base/dsh-aio:dev-amd64-13de9a67` (verified via the harbor v2 tags API).
 
+## Image runtime smokes (10.1.17.58)
+
+- First harbor smoke: container up, noVNC 200, node/Chrome present, but **`dsh web` never listened** (180s, then a 14-minute watch). Root cause found with `bash -x`: the entrypoint forked `pnpm dev:web --poll` and immediately `exec`'d `pnpm dsh web`; dev:web's first cold pass rewrites `apps/web/dist` over the baked build and vite leaves the tree half-written for minutes — web booted against that tree and died pre-listen. Fixed in entrypoint.sh: web now starts only after the watch build exits (or 25-minute cap) and `apps/web/dist/index.html` has been quiet for 5s. Rebuilt as build #24 (SUCCESS, harbor re-pushed).
+- Host quirk, same as `docs/ops/2026-09-01` recorded on the crun host: on 17.58 (CentOS 7, docker 20.10.8/runc) a plain `docker run -d` of the image freezes PID1 mid-boot — entrypoint logs stop at the autocutsel/noVNC stage, nothing after. With the repo-documented workaround (`--entrypoint bash … -c 'sleep 60000'` + `docker exec -d … /usr/local/bin/entrypoint.sh`) the full stack comes up and **web answers 200 at t=45s** on the fixed image. Deploy on this host must use the two-step launch; entrypoint-as-PID1 works on the other deploy hosts.
+
 ## Reusable facts
 
 - Jenkins→10.1.17.58 SSH: user **admin** (root and Admin are both rejected), credential `ssh`, pipeline wraps steps in `sshagent(credentials:['ssh'])`.

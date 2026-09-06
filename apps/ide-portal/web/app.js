@@ -1,11 +1,9 @@
 /* The start page is a projection of the server state (0007: 服务端状态权威):
    it renders exactly what /api/state + /api/events carry and holds no
-   business logic of its own. The entry auto-checks on arrival (a read-only
-   reconcile). 检查 and 开通 are two separate actions (requester decision,
-   2026-09-06): 检查 re-runs the read-only probe; 开通 is idempotent —
+   business logic of its own. Three buttons (requester decision, 2026-09-06):
+   检查我的IDE re-runs the read-only probe; 启动我的IDE is idempotent —
    healthy short-circuits, an in-flight run is joined, and only an absent or
-   stopped container triggers create/start. The jump to the IDE stays with
-   the user's click on the open button. */
+   stopped container triggers create/start; 进入我的IDE jumps. */
 'use strict'
 
 const statusEl = document.getElementById('status')
@@ -17,10 +15,10 @@ const openBtn = document.getElementById('open')
 const LABELS = {
   PROVISIONING: '正在创建你的 IDE 容器…',
   STARTING: '正在启动容器并通过健康检查…',
-  HEALTHY: '服务已就绪,点击“进入我的 IDE”。',
-  READY: '服务已就绪!点击“进入我的 IDE”。',
-  FAILED: '开通失败,见下方日志;可再次点击“开通”重试。',
-  TIMEOUT: '健康检查超时;可再次点击“开通”重试。',
+  HEALTHY: '服务已就绪,点击“进入我的IDE”。',
+  READY: '服务已就绪!点击“进入我的IDE”。',
+  FAILED: '启动失败,见下方日志;可再次点击“启动我的IDE”重试。',
+  TIMEOUT: '健康检查超时;可再次点击“启动我的IDE”重试。',
   IDLE: '服务处于闲置状态,正在唤醒…',
   UNHEALTHY: '服务异常,正在自动恢复…',
 }
@@ -37,7 +35,7 @@ function renderState(event) {
     statusEl.textContent = '正在检查服务状态…'
     statusEl.className = 'state checking'
   } else {
-    statusEl.textContent = state === 'NO_SERVICE' ? '尚未开通:点击“开通”创建你的 IDE。' : (LABELS[state] ?? state)
+    statusEl.textContent = state === 'NO_SERVICE' ? '尚未开通:点击“启动我的IDE”创建你的 IDE。' : (LABELS[state] ?? state)
     statusEl.className = 'state ' + state.toLowerCase()
   }
   if (event.ideUrl) openBtn.href = event.ideUrl
@@ -45,11 +43,11 @@ function renderState(event) {
   // 检查 stays available except while a probe or a run is in flight.
   checkBtn.hidden = busy
   checkBtn.disabled = Boolean(event.checking)
-  // 开通 covers create, start, and retry; hidden once the service is usable.
+  // 启动我的IDE covers create, start, and retry; hidden once the service is usable.
   const needProvision = state === 'NO_SERVICE' || state === 'FAILED' || state === 'TIMEOUT' || state === 'UNHEALTHY' || state === 'IDLE'
   provisionBtn.hidden = !(needProvision || state === 'PROVISIONING' || state === 'STARTING')
   provisionBtn.disabled = state === 'PROVISIONING' || state === 'STARTING'
-  provisionBtn.textContent = state === 'PROVISIONING' ? '开通中…' : (state === 'STARTING' ? '启动中…' : '开通')
+  provisionBtn.textContent = state === 'PROVISIONING' ? '创建中…' : (state === 'STARTING' ? '启动中…' : '启动我的IDE')
 }
 
 function renderStep(step) {
@@ -85,8 +83,8 @@ checkBtn.addEventListener('click', async () => {
   statusEl.textContent = '正在检查服务状态…'
   await fetch('/api/check', { method: 'POST', credentials: 'same-origin' })
 })
-// 开通 is idempotent on the server; a second click while it runs joins the
-// in-flight run instead of starting a duplicate.
+// 启动我的IDE is idempotent on the server; a second click while it runs
+// joins the in-flight run instead of starting a duplicate.
 provisionBtn.addEventListener('click', async () => {
   provisionBtn.disabled = true
   await fetch('/api/provision', { method: 'POST', credentials: 'same-origin' })

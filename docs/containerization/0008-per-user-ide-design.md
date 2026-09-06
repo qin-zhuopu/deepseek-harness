@@ -32,8 +32,8 @@ A small Node service deployed as one long-running container on 10.1.17.58 behind
 | `GET /` | No session cookie → the gate's `/login` redirect. Session → the page renders immediately; the arrival reconcile runs behind the request and its chain streams over `/api/events` (requester decision, 2026-09-06: instant open, progress over SSE). While it runs the status line shows 正在检查 rather than a stale verdict the probe may overturn. |
 | `GET /api/state` | Current state snapshot: state, last steps, IDE url when ready. Page bootstrap and SSE-reconnect baseline. |
 | `GET /api/events` | SSE: `state` and `step` events; replays the buffered step log on connect, then streams live (FR5, N2). |
-| `POST /api/check` | Re-run the read-only arrival probe; the 检查 button drives it and the chain streams over SSE. |
-| `POST /api/provision` | Provision, idempotent (requester decision, 2026-09-06): HEALTHY short-circuits, an in-flight run is joined instead of duplicated (FR7), and only absent/stopped containers trigger create/start. The 开通 button drives it and subsumes retry. |
+| `POST /api/check` | Re-run the read-only arrival probe; the 检查我的IDE button drives it and the chain streams over SSE. |
+| `POST /api/provision` | Provision, idempotent (requester decision, 2026-09-06): HEALTHY short-circuits, an in-flight run is joined instead of duplicated (FR7), and only absent/stopped containers trigger create/start. The 启动我的IDE button drives it and subsumes retry. |
 | `POST /api/retry` | Re-reconcile, then retry the failed step (FR8). |
 
 State machine transitions follow [0007](0007-per-user-ide-requirements.md). The portal is front/back separated: the start page is a static SPA built separately from the backend, every state crossing is JSON (`/api/state`, the POSTs) or SSE (`/api/events`), and the backend serves the built SPA statically without holding page logic. The portal maps state transitions onto Jenkins actions:
@@ -134,7 +134,7 @@ SSE event payloads are append-only JSON objects:
 
 Steps: `reconcile`, `lock`, `jenkins-queued`, `jenkins-running`, `image-pull`, `docker-run`, `start-hook`, `probe-internal`, `probe-proxy`, `ready`, `failed`. The portal buffers the current run's steps in memory and replays them on SSE (re)connect; after a portal restart the Jenkins build named in the marker file is re-attached and tailed again, so the log survives (N3).
 
-The entry probe is the only automatic action (read-only; requester decision, 2026-09-06: read-only operations run without a click). 检查 and 开通 are separate buttons (requester decision, 2026-09-06): 检查 re-runs the read-only probe; 开通 provisions idempotently (create, start, and retry converge into one action). Each check renders one chain — uid, domain, service state, compose location, health probe, verdict — with Chinese readable details; a new chain replaces the previous one. Ready states stop at the status line — the browser never navigates on its own; the persistent "Enter my IDE" button carries the jump.
+The entry probe is the only automatic action (read-only; requester decision, 2026-09-06: read-only operations run without a click). Three buttons (requester decision, 2026-09-06): 检查我的IDE re-runs the read-only probe; 启动我的IDE provisions idempotently (create, start, and retry converge into one action); 进入我的IDE jumps. Each check renders one chain — uid, domain, service state, compose location, health probe, verdict — with Chinese readable details; a new chain replaces the previous one. Ready states stop at the status line — the browser never navigates on its own; the persistent "Enter my IDE" button carries the jump.
 
 ## Container-side login (O2)
 

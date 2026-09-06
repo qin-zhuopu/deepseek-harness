@@ -88,8 +88,8 @@ function humanizeDetail(step: string, detail: string): string {
 function verdictDetail(reconcile: Reconcile): string {
   switch (reconcile.kind) {
     case 'healthy': return '专属IDE状态正常'
-    case 'absent': return '未开通——点击「开通」创建你的 IDE'
-    case 'exists': return reconcile.running ? '容器在运行,但健康检查未通过' : '容器存在但未运行——点击「开通」重新启动'
+    case 'absent': return '未开通——点击「启动我的IDE」创建你的 IDE'
+    case 'exists': return reconcile.running ? '容器在运行,但健康检查未通过' : '容器存在但未运行——点击「启动我的IDE」重新启动'
   }
 }
 

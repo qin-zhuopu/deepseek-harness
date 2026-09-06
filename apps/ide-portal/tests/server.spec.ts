@@ -130,7 +130,7 @@ describe('entry auto-checks on arrival (read-only, fast open)', () => {
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     const direct = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' }, redirect: 'manual' })
     expect(direct.status).toBe(200)
-    expect(await direct.text()).toContain('开通')
+    expect(await direct.text()).toContain('启动我的IDE')
     const snapshot = await pollChecked(h)
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
     expect(snapshot.state.state).toBe('HEALTHY')
@@ -142,7 +142,7 @@ describe('entry auto-checks on arrival (read-only, fast open)', () => {
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
-    expect(await page.text()).toContain('开通')
+    expect(await page.text()).toContain('启动我的IDE')
     const snapshot = await pollChecked(h)
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
     expect(snapshot.state.state).toBe('NO_SERVICE')
@@ -179,7 +179,7 @@ describe('warm path (FR3)', () => {
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
   })
 
-  it('POST /api/check re-runs the read-only probe and renders the chain (检查 button)', async () => {
+  it('POST /api/check re-runs the read-only probe and renders the chain (检查我的IDE button)', async () => {
     const h = await start()
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     const check = await fetch(`${h.base}/api/check`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })

@@ -23,6 +23,10 @@ RUN npm config set registry ${NPM_REGISTRY}
 
 WORKDIR /workspaces/deepseek-harness
 COPY . .
+# The lefthook git-hook installer is development-worktree tooling: the image is
+# not a checkout, and its postinstall fails when the build inherits a
+# core.hooksPath (the Jenkins agent's is /dev/null).
+RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.scripts.postinstall;fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
 RUN pnpm install --no-frozen-lockfile --filter @deepseek-ai/dsh-ide-portal...
 
 # State dir: last-triggered-build marker files (N3); mount a named volume here.

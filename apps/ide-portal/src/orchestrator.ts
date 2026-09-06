@@ -7,6 +7,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { get as httpGet, type IncomingMessage } from 'node:http'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { PortalConfig } from './config.ts'
@@ -25,6 +26,18 @@ export interface Clock {
 export const realClock: Clock = {
   sleep: ms => new Promise<void>((resolve) => { setTimeout(resolve, ms) }),
   now: () => Date.now(),
+}
+
+/** One direct HTTP GET against the IDE vhost; the status code, or undefined on any failure or timeout. */
+export function probeUrl(url: URL, timeoutMs: number): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    const request = httpGet(
+      { hostname: url.hostname, port: url.port === '' ? 80 : Number(url.port), path: url.pathname || '/', headers: { host: url.host } },
+      (res: IncomingMessage) => { res.resume(); resolve(res.statusCode) },
+    )
+    request.setTimeout(timeoutMs, () => { request.destroy(); resolve(undefined) })
+    request.on('error', () => resolve(undefined))
+  })
 }
 
 /** Subscriber signature for the live event stream. */
@@ -48,60 +61,9 @@ export function resolveUid(config: PortalConfig, claims: Record<string, unknown>
   return sub
 }
 
-/** Display labels for the probe's host-fact markers (requester chain, 2026-09-06). */
-const CHECK_LABELS: Record<string, string> = { service: '服务状态', compose: 'Compose 位置', health: '健康检查' }
-
-/** Docker states provision.sh reports through the `service` marker, in Chinese. */
-const DOCKER_STATES: Record<string, string> = {
-  running: '容器运行中',
-  absent: '容器不存在(尚未开通)',
-  exited: '容器已停止',
-  created: '容器已创建但未启动',
-  dead: '容器已死亡(dead)',
-  frozen: '容器冻结(frozen)',
-}
-
-/** Translate one probe marker's raw detail into page Chinese (the log is for operators in China). */
-function humanizeDetail(step: string, detail: string): string {
-  if (step === 'service') return DOCKER_STATES[detail.replace(/^docker:\s*/, '')] ?? `容器状态:${detail}`
-  if (step === 'compose') {
-    if (detail.startsWith('非 compose')) return '独立容器(由开通脚本创建,非 compose 项目)'
-    const match = /^(.+?)(?::(\d+))?\s+service=(.+)$/.exec(detail)
-    if (match !== null) return `compose 配置 ${match[1] ?? ''}${match[2] !== undefined ? ` 第${match[2]}行` : ''},服务名 ${match[3] ?? ''}`
-    return detail
-  }
-  if (step === 'health') {
-    const http = /^HTTP (\d+) from container$/.exec(detail)
-    if (http !== null) {
-      const code = http[1] ?? ''
-      const gate = code === '401' || code === '302' ? '(登录保护正常)' : ''
-      return `容器应答 HTTP ${code}${gate}`
-    }
-    const none = /^no answer \(last (\d+)\)$/.exec(detail)
-    if (none !== null) return `容器无应答(最后一次 HTTP ${none[1] ?? ''})`
-    return detail
-  }
-  return detail
-}
-
-/** The final verdict line for a reconcile result, in Chinese. */
+/** The final verdict line for a check result, in Chinese (the log is for business users). */
 function verdictDetail(reconcile: Reconcile): string {
-  switch (reconcile.kind) {
-    case 'healthy': return '专属IDE状态正常'
-    case 'absent': return '未开通——点击「启动我的IDE」创建你的 IDE'
-    case 'exists': return reconcile.running ? '容器在运行,但健康检查未通过' : '容器存在但未运行——点击「启动我的IDE」重新启动'
-  }
-}
-
-/** The reconcile verdict the probe job reports via its `reconcile` marker detail. */
-function reconcileFromDetail(detail: string): Reconcile {
-  switch (detail.trim()) {
-    case 'absent': return { kind: 'absent' }
-    case 'healthy': return { kind: 'healthy' }
-    case 'stopped': case 'frozen': return { kind: 'exists', running: false }
-    case 'running-unhealthy': return { kind: 'exists', running: true }
-    default: throw new Error(`reconcile: unknown probe detail ${JSON.stringify(detail)}`)
-  }
+  return reconcile.kind === 'healthy' ? '专属IDE状态正常' : '未运行——点击「启动我的IDE」部署或启动'
 }
 
 /** Map a marker step name to the service state it establishes (monotonic within a run). */
@@ -125,7 +87,17 @@ export class Orchestrator {
   private readonly markerDir: string
 
   /** Build the orchestrator; the marker directory is created eagerly. */
-  constructor(config: PortalConfig, jenkins: JenkinsClient, markerDir: string, clock: Clock = realClock) {
+  /** The direct vhost check used by reconcile; tests inject a scripted fake. */
+  private readonly probe: (url: URL, timeoutMs: number) => Promise<number | undefined>
+
+  constructor(
+    config: PortalConfig,
+    jenkins: JenkinsClient,
+    markerDir: string,
+    clock: Clock = realClock,
+    probe: (url: URL, timeoutMs: number) => Promise<number | undefined> = probeUrl,
+  ) {
+    this.probe = probe
     this.config = config
     this.jenkins = jenkins
     this.clock = clock
@@ -206,7 +178,7 @@ export class Orchestrator {
     try {
       await this.reconcile(uid)
     } catch (error) {
-      this.appendStep(uid, '检查', 'fail', `探针未完成: ${error instanceof Error ? error.message : String(error)}`)
+      this.appendStep(uid, '检查', 'fail', `自动检查没有完成,请点击「检查我的IDE」重试;多次失败请联系管理员。（原因：${error instanceof Error ? error.message : String(error)}）`)
     } finally {
       run.checking = false
       this.emit(uid, this.stateEvent(uid))
@@ -214,44 +186,31 @@ export class Orchestrator {
   }
 
   /**
-   * Reconcile (FR6): run the probe job and adopt what the host reports. The
-   * result replaces any stale in-memory state unless a provisioning run is
-   * in flight for this uid. The chain streams incrementally (requester,
-   * 2026-09-06): identity steps, the Jenkins lifecycle, then one step per
-   * probe marker as the console tail yields it — never a single dump at the
-   * end of a silent wait.
+   * Check (requester decision, revised 2026-09-06): NO Jenkins build — the
+   * portal fetches the IDE's own vhost; any answer below 500 (401/302 are
+   * the login gate protecting a healthy service) reads as running, silence
+   * or a proxy 5xx reads as not running. The absent/stopped distinction
+   * does not matter to the user: 启动 converges both.
    */
   async reconcile(uid: string): Promise<Reconcile> {
-    if (this.busy.has(uid)) {
-      const current = this.run(uid).snapshot.state
-      return current === 'HEALTHY' || current === 'READY' ? { kind: 'healthy' } : { kind: 'exists', running: true }
-    }
-    // Each check renders as one chain (requester, 2026-09-06): a fresh arrival
-    // must not replay the day's older chains, or a stale 正常 verdict drowns
-    // the new one. `seq` stays monotonic, so connected pages dedup correctly.
     const run = this.ensure(uid)
     run.steps = []
     this.appendStep(uid, '工号', 'info', uid)
-    this.appendStep(uid, '域名', 'info', ideUrl(this.config, uid))
-    this.appendStep(uid, '检查', 'info', '已触发检查任务,等待 Jenkins 执行…')
-    const build = await this.trigger(uid, 'probe')
-    this.appendStep(uid, 'jenkins-running', 'ok', `检查构建 #${String(build)}`)
-    let verdict: Reconcile | undefined
-    const markers = await this.tailBuild(build, (marker) => {
-      if (marker.step === 'reconcile' && marker.status !== 'fail') verdict = reconcileFromDetail(marker.detail)
-      const label = CHECK_LABELS[marker.step]
-      if (label !== undefined) this.appendStep(uid, label, marker.status, humanizeDetail(marker.step, marker.detail))
-    })
-    const line = markers.find(marker => marker.step === 'reconcile')
-    if (line === undefined || line.status === 'fail' || verdict === undefined) {
-      throw new Error(`reconcile: probe build #${String(build)} returned no reconcile marker`)
+    const url = ideUrl(this.config, uid)
+    this.appendStep(uid, '域名', 'info', url)
+    this.appendStep(uid, '检查', 'info', '正在检查服务…')
+    const code = await this.probe(new URL(url), this.config.health.probeTimeoutMs)
+    const healthy = code !== undefined && code < 500
+    const reconcile: Reconcile = healthy ? { kind: 'healthy' } : { kind: 'notrunning' }
+    if (healthy) {
+      const gate = code === 401 || code === 302 ? '(登录保护正常)' : ''
+      this.appendStep(uid, '服务状态', 'ok', `服务应答 HTTP ${String(code)}${gate}`)
+    } else {
+      this.appendStep(uid, '服务状态', 'fail', '服务无应答(未部署或已停止)')
     }
-    const reconcile = verdict
-    run.snapshot = { state: stateFromReconcile(reconcile), build, failedStep: undefined }
+    run.snapshot = { state: stateFromReconcile(reconcile), build: undefined, failedStep: undefined }
     run.updatedMs = this.clock.now()
-    // Absent and healthy are legitimate verdicts (info); a container that
-    // exists but fails its health probe is the only red conclusion.
-    this.appendStep(uid, '结论', reconcile.kind === 'exists' ? 'fail' : 'info', verdictDetail(reconcile))
+    this.appendStep(uid, '结论', healthy ? 'ok' : 'info', verdictDetail(reconcile))
     this.emit(uid, this.stateEvent(uid))
     return reconcile
   }
@@ -317,29 +276,6 @@ export class Orchestrator {
     return build
   }
 
-  /** Run the short probe build to completion, returning its markers; `onMarker` streams each as the tail yields it. */
-  private async tailBuild(
-    build: number,
-    onMarker?: (marker: { step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }) => void,
-  ): Promise<{ step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }[]> {
-    const all: { step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }[] = []
-    let cursor = freshCursor()
-    const deadline = this.clock.now() + 120_000
-    for (;;) {
-      const chunk = await this.jenkins.console(build, cursor.start)
-      cursor = { start: chunk.size, more: chunk.more }
-      for (const marker of parseMarkers(chunk.text)) {
-        all.push(marker)
-        onMarker?.(marker)
-      }
-      if (all.some(marker => marker.step === 'ready' || marker.step === 'failed')) break
-      const result = await this.jenkins.result(build)
-      if (result !== undefined || this.clock.now() > deadline) break
-      await this.clock.sleep(this.config.health.pollMs)
-    }
-    return all
-  }
-
   /**
    * The business-language rendering of one run marker (requester decision,
    * 2026-09-06): normal users read 部署/启动服务/启动后自检 — not
@@ -364,7 +300,7 @@ export class Orchestrator {
       case 'start-hook':
         if (marker.detail.includes('skipping start')) return { step: '启动服务', status: 'info', detail: 'IDE 已在运行,无需启动' }
         return marker.status === 'ok'
-          ? { step: '启动服务', status: 'info', detail: '服务启动中,健康自检进行中…' }
+          ? { step: '启动服务', status: 'ok', detail: '服务已启动' }
           : { step: '启动服务', status: 'info', detail: '首次无响应,正在重试启动…' }
       case 'probe-internal':
         return marker.status === 'ok'

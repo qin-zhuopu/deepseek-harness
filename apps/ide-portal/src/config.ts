@@ -48,6 +48,8 @@ export interface HealthConfig {
   timeoutSec: number
   /** Queue-follow and console-tail cadence in milliseconds (N2 keeps this under 2 s). */
   pollMs: number
+  /** How long the direct vhost check waits before reading the service as not running. */
+  probeTimeoutMs: number
 }
 
 /** Fully validated portal configuration; nothing tunable is hardcoded elsewhere. */
@@ -122,7 +124,7 @@ export function parsePortalConfig(text: string): PortalConfig {
       redirectPath: need(iam, 'redirectPath', 'iam'),
       ...(iam['trustFile'] === undefined ? {} : { trustFile: need(iam, 'trustFile', 'iam') }),
     },
-    health: { intervalSec: needNum(health, 'intervalSec', 'health'), timeoutSec: needNum(health, 'timeoutSec', 'health'), pollMs: needNum(health, 'pollMs', 'health') },
+    health: { intervalSec: needNum(health, 'intervalSec', 'health'), timeoutSec: needNum(health, 'timeoutSec', 'health'), pollMs: needNum(health, 'pollMs', 'health'), probeTimeoutMs: health['probeTimeoutMs'] === undefined ? 5000 : needNum(health, 'probeTimeoutMs', 'health') },
     bindHost: raw['bindHost'] === undefined ? '127.0.0.1' : need(raw, 'bindHost', 'root'),
     port: raw['port'] === undefined ? 8080 : needNum(raw, 'port', 'root'),
   }

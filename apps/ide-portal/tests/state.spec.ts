@@ -31,10 +31,8 @@ describe('advance', () => {
 })
 
 describe('stateFromReconcile (FR6)', () => {
-  it('maps probe verdicts to shortest-path states', () => {
+  it('maps check verdicts to shortest-path states', () => {
     expect(stateFromReconcile({ kind: 'healthy' })).toBe('HEALTHY')
-    expect(stateFromReconcile({ kind: 'exists', running: false })).toBe('STARTING')
-    expect(stateFromReconcile({ kind: 'exists', running: true })).toBe('STARTING')
-    expect(stateFromReconcile({ kind: 'absent' })).toBe('NO_SERVICE')
+    expect(stateFromReconcile({ kind: 'notrunning' })).toBe('NO_SERVICE')
   })
 })

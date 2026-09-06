@@ -8,7 +8,7 @@ The 启动 button ran a read-only probe build before every provisioning, so a co
 
 ## Decision
 
-The portal's 启动我的IDE action never triggers the read-only probe build. It runs exactly one `ide-provision` build with `ACTION=create`, which converges host-side: an absent container is created, an existing one is started (the log names the skipped deploy), and the post-start probes gate readiness. When the latest check found the IDE running, the action builds nothing and appends a `提示` step (`IDE 已在运行,无需启动。`) instead. The 检查我的IDE action stays a pure probe.
+The portal's 启动我的IDE action never triggers the read-only probe build. It runs exactly one `ide-provision` build with `ACTION=create`, which converges host-side: an absent container is created, an existing one is started (the log names the skipped deploy), and the post-start probes gate readiness. When the latest check found the IDE running, the action builds nothing and appends a `提示` step (`IDE 已在运行,无需启动。`) instead. The 检查我的IDE action stays read-only (later the same day it stopped being a Jenkins probe entirely — see feature/2026-09-06-ide-portal-check-direct-vhost-fetch.md).
 
 Run steps render in business language (`开始启动/准备运行环境/部署/启动服务/启动后自检/外部访问检查/就绪/启动失败`); the state machine keeps consuming the raw marker names underneath, so `STEP_STATE` and failure attribution (`snapshot.failedStep`) are unchanged. Check chains keep their own labels (`工号/域名/检查/服务状态/Compose 位置/健康检查/结论`).
 

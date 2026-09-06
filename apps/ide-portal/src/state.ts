@@ -19,11 +19,10 @@ export type ServiceState =
   | 'IDLE'
   | 'UNHEALTHY'
 
-/** The reconciled Docker/proxy observation the machine transitions from. */
+/** The observation a check renders: the vhost answered below 500, or it did not. */
 export type Reconcile =
-  | { kind: 'absent' }
-  | { kind: 'exists'; running: boolean }
   | { kind: 'healthy' }
+  | { kind: 'notrunning' }
 
 /** Edges accepted by the machine; anything else is a bug at the caller, asserted. */
 const EDGES: Readonly<Record<ServiceState, readonly ServiceState[]>> = {
@@ -57,11 +56,7 @@ export function advance(snapshot: MachineSnapshot, next: ServiceState): MachineS
 
 /** The shortest path from a fresh reconcile observation to the state a new entry starts in (FR6). */
 export function stateFromReconcile(reconcile: Reconcile): ServiceState {
-  switch (reconcile.kind) {
-    case 'healthy': return 'HEALTHY'
-    case 'exists': return 'STARTING'
-    case 'absent': return 'NO_SERVICE'
-  }
+  return reconcile.kind === 'healthy' ? 'HEALTHY' : 'NO_SERVICE'
 }
 
 /** One user's tracked run: machine state plus its step log, keyed by uid upstream. */

@@ -392,7 +392,9 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(accepted.status).toBe(202)
     const final = await pollState(stack.portalBase, token, 'READY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
-    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(2)
+    // The arrival check is a direct vhost fetch now, so this create is the
+    // only build of the session.
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
   }, 30_000)
 
   it('the entry auto-checks on arrival: a healthy container renders the page on HEALTHY without provisioning', async () => {
@@ -402,7 +404,8 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(entry.status).toBe(200)
     const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
-    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
+    // The direct vhost check touches no Jenkins at all.
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(0)
   }, 30_000)
 
   it('attaches to the marker-named build after a portal restart and drives it to READY', async () => {

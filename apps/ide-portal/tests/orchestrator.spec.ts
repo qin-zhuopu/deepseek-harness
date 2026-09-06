@@ -35,9 +35,12 @@ interface Harness {
   config: PortalConfig
   stateDir: string
   events: LiveEvent[]
+  probeResults: (number | undefined)[]
 }
 
-async function harness(clock: Clock = instantClock): Promise<Harness> {
+type Probe = (url: URL, timeoutMs: number) => Promise<number | undefined>
+
+async function harness(clock: Clock = instantClock, probeOverride?: Probe): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'ide-portal-orch-'))
   dirs.push(dir)
   const stateDir = join(dir, 'state')
@@ -54,10 +57,14 @@ health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
     port: 0,
   }
   const jenkins = new FakeJenkins()
-  const orchestrator = new Orchestrator(config, jenkins, stateDir, clock)
+  // The direct vhost check is injectable: each answer is popped in order;
+  // an exhausted list reads as no answer (not running).
+  const probeResults: (number | undefined)[] = []
+  const probe = async (): Promise<number | undefined> => probeResults.shift()
+  const orchestrator = new Orchestrator(config, jenkins, stateDir, clock, probeOverride ?? probe)
   const events: LiveEvent[] = []
   orchestrator.subscribe((_uid, event) => events.push(event))
-  return { orchestrator, jenkins, config, stateDir, events }
+  return { orchestrator, jenkins, config, stateDir, events, probeResults }
 }
 
 const COLD = `[DSH_STEP] 2 image-pull ok pulled dev-amd64-abc1234
@@ -104,40 +111,49 @@ describe('cold path (FR4, US1)', () => {
 })
 
 describe('arrival check (fast open, 2026-09-06)', () => {
-  it('each reconcile renders exactly one chain; seq stays monotonic across the reset', async () => {
-    const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+  it('each check renders exactly one chain; seq stays monotonic across the reset', async () => {
+    const { orchestrator, jenkins, probeResults } = await harness()
+    probeResults.push(401, undefined)
     await orchestrator.reconcile('14409')
     const firstSeqs = orchestrator.run('14409').steps.map(s => s.seq)
     await orchestrator.reconcile('14409')
     const run = orchestrator.run('14409')
     // The second check shows one fresh chain (no replayed history drowning the
     // new verdict) and its seqs continue past the first check's.
-    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '结论'])
+    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
     expect(run.snapshot.state).toBe('NO_SERVICE')
     expect(Math.min(...run.steps.map(s => s.seq))).toBeGreaterThan(Math.max(...firstSeqs))
+    // The direct check never touches Jenkins.
+    expect(jenkins.triggered).toEqual([])
   })
 
-  it('arrive surfaces a probe failure as a step without flipping the machine state', async () => {
-    const { orchestrator, jenkins } = await harness()
-    // A probe build with no reconcile marker throws inside reconcile.
-    jenkins.script('probe', { console: '', result: 'SUCCESS' })
+  it('a 401/302 answer reads as the login gate protecting a healthy service', async () => {
+    const { orchestrator, probeResults } = await harness()
+    probeResults.push(401)
+    await orchestrator.reconcile('14409')
+    const run = orchestrator.run('14409')
+    expect(run.snapshot.state).toBe('HEALTHY')
+    expect(run.steps.find(s => s.step === '服务状态')?.detail).toContain('登录保护正常')
+  })
+
+  it('arrive surfaces a thrown check as a step without flipping the machine state', async () => {
+    const { orchestrator } = await harness(instantClock, async () => { throw new Error('dns exploded') })
     await orchestrator.arrive('14409')
     const run = orchestrator.run('14409')
     expect(orchestrator.stateEvent('14409').checking).toBe(false)
-    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '检查'])
+    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '检查'])
     expect(run.steps.at(-1)?.status).toBe('fail')
     expect(run.snapshot.state).toBe('NO_SERVICE')
   })
 })
 
 describe('warm path (FR3)', () => {
-  it('reconcile finding a healthy container returns HEALTHY without provisioning', async () => {
-    const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    expect(await orchestrator.reconcile('14409').then(() => 'HEALTHY')).toBe('HEALTHY')
-    expect(jenkins.triggered.map(t => t.action)).toEqual(['probe'])
+  it('a check finding a running service lands HEALTHY without provisioning', async () => {
+    const { orchestrator, jenkins, probeResults } = await harness()
+    probeResults.push(200)
+    await orchestrator.reconcile('14409')
+    expect(orchestrator.run('14409').snapshot.state).toBe('HEALTHY')
+    expect(jenkins.triggered).toEqual([])
   })
 })
 
@@ -169,15 +185,13 @@ describe('failure terminals (FR8, FR6)', () => {
 
   it('starting an already-running IDE still builds once; the host skips the start and confirms', async () => {
     const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    await orchestrator.reconcile('14409')
     jenkins.script('create', {
       console: '[DSH_STEP] 1 start-hook info already running and answering; skipping start\n[DSH_STEP] 2 probe-internal ok HTTP 200 (already running)\n[DSH_STEP] 3 probe-proxy ok HTTP 200\n[DSH_STEP] 4 ready ok done\n',
       result: 'SUCCESS',
     })
     expect(await orchestrator.start('14409')).toBe('READY')
     // The portal holds no host truth: 启动 always converges through a build.
-    expect(jenkins.triggered.map(t => t.action)).toEqual(['probe', 'create'])
+    expect(jenkins.triggered.map(t => t.action)).toEqual(['create'])
     const skipped = orchestrator.run('14409').steps.find(s => s.detail.includes('已在运行,无需启动'))
     expect(skipped?.step).toBe('启动服务')
   })

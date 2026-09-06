@@ -37,6 +37,8 @@ interface Harness {
   token: string
   server: PortalServer
   jenkins: FakeJenkins
+  setProbe(code: number | undefined): void
+  releaseProbe(): void
   close(): Promise<void>
 }
 
@@ -46,7 +48,7 @@ afterEach(async () => {
   if (open !== undefined) { await open.close(); open = undefined }
 })
 
-async function start(): Promise<Harness> {
+async function start(options: { holdProbe?: boolean } = {}): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'ide-portal-srv-'))
 
   const idp = createServer((req, res) => {
@@ -79,7 +81,18 @@ health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
 port: 0
 `)
   const jenkins = new FakeJenkins()
-  const orchestrator = new Orchestrator(config, jenkins, join(dir, 'state'), instantClock)
+  // The vhost check is a fake here: by default the IDE answers 401 (the
+  // login gate) unless this run pushed another code; a held probe blocks
+  // until releaseProbe, proving the page answers without it.
+  let probeAnswer: number | undefined = 401
+  let releaseProbe: (() => void) | undefined
+  const held = options.holdProbe === true
+  const probe = async (): Promise<number | undefined> => {
+    if (held && releaseProbe !== undefined) await new Promise<void>((resolve) => { releaseProbe = resolve })
+    return probeAnswer
+  }
+  const orchestrator = new Orchestrator(config, jenkins, join(dir, 'state'), instantClock, probe)
+  const setProbe = (code: number | undefined): void => { probeAnswer = code }
   const server = createPortalServer(config, orchestrator, createIamClient(config.iam), new URL('../web', import.meta.url).pathname)
   const port = await server.listen()
   const harness: Harness = {
@@ -87,6 +100,8 @@ port: 0
     token: idToken(issuer),
     server,
     jenkins,
+    setProbe,
+    releaseProbe: () => { if (releaseProbe !== undefined) releaseProbe() },
     close: async () => { await server.close(); idp.close(); await once(idp, 'close'); await rm(dir, { recursive: true, force: true }) },
   }
   open = harness
@@ -111,7 +126,6 @@ describe('guard', () => {
 
   it('serves the static shell only with a valid bearer session', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     const page = await fetch(`${h.base}/app.js`, { headers: { authorization: `Bearer ${h.token}` } })
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('EventSource')
@@ -125,45 +139,36 @@ describe('guard', () => {
 })
 
 describe('entry auto-checks on arrival (read-only, fast open)', () => {
-  it('GET / with a healthy service renders the page immediately; the probe lands HEALTHY behind the request', async () => {
+  it('GET / with a running service renders the page immediately; the direct check lands HEALTHY behind the request', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     const direct = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' }, redirect: 'manual' })
     expect(direct.status).toBe(200)
     expect(await direct.text()).toContain('启动我的IDE')
     const snapshot = await pollChecked(h)
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
+    expect(h.jenkins.triggered).toEqual([])
     expect(snapshot.state.state).toBe('HEALTHY')
     expect(snapshot.state.ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
   })
 
-  it('GET / on an absent container renders the start page and stays NO_SERVICE until the button', async () => {
+  it('GET / with a silent vhost renders the start page and stays NO_SERVICE until the button', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    h.setProbe(undefined)
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('启动我的IDE')
     const snapshot = await pollChecked(h)
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
+    expect(h.jenkins.triggered).toEqual([])
     expect(snapshot.state.state).toBe('NO_SERVICE')
   })
 
-  it('GET / answers before the probe finishes — the check streams over SSE, never blocking the HTML', async () => {
-    const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    // Hold the trigger until the page has provably answered without it.
-    let release!: () => void
-    const held = new Promise<void>((resolve) => { release = resolve })
-    const unheld = h.jenkins.trigger.bind(h.jenkins)
-    h.jenkins.trigger = async (params) => { await held; return await unheld(params) }
+  it('GET / answers before the check finishes — the result streams over SSE, never blocking the HTML', async () => {
+    const h = await start({ holdProbe: true })
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
-    expect(h.jenkins.triggered).toHaveLength(0)
     expect(await page.text()).toContain('IDE 门户')
-    release()
+    h.releaseProbe()
     const snapshot = await pollChecked(h)
     expect(snapshot.state.state).toBe('HEALTHY')
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
   })
 })
 
@@ -179,7 +184,6 @@ const COLD = `[DSH_STEP] 1 image-pull ok pulled dev-amd64-abc1234
 describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
   it('starting an already-running IDE still converges through one create build (host-side idempotence)', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     h.jenkins.script('create', {
       console: '[DSH_STEP] 1 start-hook info already running and answering; skipping start\n[DSH_STEP] 2 probe-internal ok HTTP 200 (already running)\n[DSH_STEP] 3 probe-proxy ok HTTP 200\n[DSH_STEP] 4 ready ok done\n',
       result: 'SUCCESS',
@@ -192,7 +196,7 @@ describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
     expect(started.status).toBe(202)
     const final = await pollState(h)
     expect(final.state.state).toBe('READY')
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe', 'create'])
+    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['create'])
     expect(final.steps.some(step => step.step === '启动服务' && ('detail' in step) && String(step['detail']).includes('已在运行,无需启动'))).toBe(true)
   })
 
@@ -209,22 +213,22 @@ describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
     ])
   })
 
-  it('POST /api/check re-runs the read-only probe and renders the chain (检查我的IDE button)', async () => {
+  it('POST /api/check re-runs the direct vhost check and renders the chain (检查我的IDE button)', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    h.setProbe(undefined)
     const check = await fetch(`${h.base}/api/check`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
     expect(check.status).toBe(202)
     const snapshot = await pollChecked(h)
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
+    expect(h.jenkins.triggered).toEqual([])
     expect(snapshot.state.state).toBe('NO_SERVICE')
-    expect(snapshot.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '结论'])
+    expect(snapshot.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
   })
 })
 
 describe('cold path page (FR4, FR5)', () => {
   it('GET / renders the start page, /api/provision drives the run, /api/state carries the steps', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    h.setProbe(undefined)
     h.jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n[DSH_STEP] 3 ready ok done\n', result: 'SUCCESS' })
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
@@ -269,7 +273,7 @@ async function pollState(h: Harness, tries = 200): Promise<StateSnapshot> {
 describe('SSE stream (FR5)', () => {
   it('/api/events replays the current state and steps, then live events until aborted', async () => {
     const h = await start()
-    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    h.setProbe(undefined)
     h.jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n[DSH_STEP] 3 ready ok done\n', result: 'SUCCESS' })
     await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
     // The stream stays open (keep-alive); collect replayed frames until READY lands, then abort.

@@ -68,7 +68,14 @@ export function createJenkinsClient(config: JenkinsConfig, fetchImpl: typeof glo
       const form = new URLSearchParams({ UID: params.uid, ACTION: params.action, IMAGE_TAG: params.imageTag, REQUEST_ID: params.requestId })
       const res = await request(`/job/${config.job}/buildWithParameters`, { method: 'POST', body: form })
       const location = res.headers.get('location')
-      if (!res.ok || location === null) throw new Error(`jenkins: trigger ${params.action} for ${params.uid} failed with ${String(res.status)}`)
+      // 404/403 here means the portal service account lost sight of the job
+      // (e.g. a renamed task and a stale role pattern); surface that cause in
+      // plain language, the raw status stays for the server log.
+      if (!res.ok || location === null) {
+        const cause = res.status === 404 || res.status === 403 ? '服务账号无权访问该任务或任务不存在' : `Jenkins 返回 ${String(res.status)}`
+        console.error(`jenkins: trigger ${params.action} for ${params.uid} failed with ${String(res.status)}`)
+        throw new Error(`Jenkins 任务触发失败（${cause}）`)
+      }
       return itemPath(location)
     },
     async followQueue(itemPath) {

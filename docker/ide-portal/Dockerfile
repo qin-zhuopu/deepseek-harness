@@ -22,13 +22,28 @@ ENV COREPACK_INTEGRITY_KEYS=0
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 RUN npm config set registry ${NPM_REGISTRY}
 
+# ── app ──
 WORKDIR /workspaces/deepseek-harness
+
+# Warm the pnpm store from the lockfile alone (same fix as
+# docker/dsh/Dockerfile.internal): this layer only invalidates when
+# dependencies change, so source-only commits keep the ~900-package download
+# cached — Nexus round-trips make a cold install the build's floor. pnpm
+# fetch also needs every file the lockfile's patchedDependencies point at.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ patches/
+RUN pnpm fetch
+
 COPY . .
 # The lefthook git-hook installer is development-worktree tooling: the image is
 # not a checkout, and its postinstall fails when the build inherits a
 # core.hooksPath (the Jenkins agent's is /dev/null).
 RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.scripts.postinstall;fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
-RUN pnpm install --no-frozen-lockfile
+# Install from the warmed store (lockfile may carry local mirror/policy
+# tweaks); fetch's store makes this a link step unless the lockfile moved.
+# fetch leaves node_modules/.pnpm marked as done, which makes install skip
+# workspace linking entirely; drop it so install relinks from the warm store.
+RUN rm -rf node_modules && pnpm install --no-frozen-lockfile
 
 # Host-face lib/ artifacts: the portal runs its own sources through Node type
 # stripping, but @deepseek-ai/dsh-host-auth-core resolves through its package

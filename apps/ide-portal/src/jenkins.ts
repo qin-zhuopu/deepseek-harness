@@ -34,7 +34,7 @@ export interface ConsoleChunk {
 
 /** The job-facing surface, injectable in tests. */
 export interface JenkinsClient {
-  /** Queue-item path of the triggered build (`queue/item/<n>/`). */
+  /** Queue-item path of the triggered build, always Jenkins-root-relative (`/queue/item/<n>/`). */
   trigger(params: TriggerParams): Promise<string>
   /** Follow a queue item to its executable build number; undefined while still queued. */
   followQueue(itemPath: string): Promise<number | undefined>
@@ -52,13 +52,24 @@ export function createJenkinsClient(config: JenkinsConfig, fetchImpl: typeof glo
     headers.set('authorization', `Basic ${auth()}`)
     return await fetchImpl(`${config.url}${path}`, { ...init, headers })
   }
+
+  /**
+   * Reduce a queue-item `location` to a root-relative path. Jenkins answers
+   * this header absolutely on some deployments and relative on others;
+   * `followQueue` and the restart re-attach prepend the configured root, so
+   * the absolute form must lose its scheme and host.
+   */
+  function itemPath(location: string): string {
+    if (!/^https?:\/\//i.test(location)) return location
+    return new URL(location).pathname
+  }
   return {
     async trigger(params) {
       const form = new URLSearchParams({ UID: params.uid, ACTION: params.action, IMAGE_TAG: params.imageTag, REQUEST_ID: params.requestId })
       const res = await request(`/job/${config.job}/buildWithParameters`, { method: 'POST', body: form })
       const location = res.headers.get('location')
       if (!res.ok || location === null) throw new Error(`jenkins: trigger ${params.action} for ${params.uid} failed with ${String(res.status)}`)
-      return location
+      return itemPath(location)
     },
     async followQueue(itemPath) {
       const res = await request(itemPath.replace(/\/+$/, '') + '/api/json')

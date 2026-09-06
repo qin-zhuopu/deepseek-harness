@@ -156,7 +156,9 @@ async function startStack(opts: StartOptions = {}): Promise<Stack> {
         const action = new URLSearchParams(raw).get('ACTION') ?? 'probe'
         nextBuild += 1
         queueItem.set(nextBuild, action)
-        res.writeHead(201, { location: `/queue/item/${String(nextBuild)}/` })
+        // Live Jenkins answers the queue location absolutely; the fake mirrors it.
+        const port = String((jenkinsServer.address() as { port: number }).port)
+        res.writeHead(201, { location: `http://127.0.0.1:${port}/queue/item/${String(nextBuild)}/` })
         res.end()
       })
       return

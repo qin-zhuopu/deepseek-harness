@@ -52,7 +52,9 @@ RUN pnpm fetch
 COPY . .
 
 # Install (immutable) from the warmed store.
-RUN pnpm install --frozen-lockfile
+# fetch leaves node_modules/.pnpm marked as done, which makes install skip
+# workspace linking entirely; drop it so install relinks from the warm store.
+RUN rm -rf node_modules && pnpm install --frozen-lockfile
 # Runtime (tsx source dispatch) resolves workspace packages through node_modules
 # links; `install --offline` after fetch was observed to skip them. Fail the
 # build, not the container boot, if a link is missing.

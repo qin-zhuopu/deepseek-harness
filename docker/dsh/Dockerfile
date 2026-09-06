@@ -44,7 +44,9 @@ ENV CI=true
 # Warm the pnpm store from the lockfile alone: this layer only invalidates
 # when dependencies change, so source-only commits keep the ~900-package
 # download cached.
-COPY pnpm-lock.yaml ./
+# pnpm fetch also needs every file the lockfile's patchedDependencies point at.
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches/ patches/
 RUN pnpm fetch
 
 COPY . .

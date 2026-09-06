@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/ops/2026-09-07-ide-whole-dir-mount-poc.md
-2026-09-07-ide-whole-dir-mount-poc.md: 96067ddeb10596e09ad2817b16ec054f4ed07c73
-2026-09-07-ide-whole-dir-mount-poc.zh.md: a4903ba2720b0948727b0bb1a75516834c2d2934
+2026-09-07-ide-whole-dir-mount-poc.md: 5f094d0649c148c9b887214a60a7b8c409f63745
+2026-09-07-ide-whole-dir-mount-poc.zh.md: 27b1b5d2cfdd552760e7e0347edb5194d686b48a

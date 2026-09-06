@@ -61,6 +61,12 @@
 
 **portal 切换只改一个 `portal.yaml` 键。** `jenkins.job` 本来就是 fail-loud 的配置项（`apps/ide-portal/src/config.ts`）；portal 只是 Jenkins API 客户端，宿主机上切换布局的操作是：编辑 `/opt/ide-provision/portal.yaml`（`jenkins.job: ide-provision-whole-dir`），然后 `docker restart ide-portal`。两个任务参数完全一致，`probe`/`start` 与布局无关，存量用户不受影响；只有新创建的容器落到整目录布局。切回 = 把键改回去。生产 `portal.yaml` 在需求方点头前仍指向 `ide-provision`；切换前先合分支，因为任务从 SCM 构建。
 
+## 切换执行（dev 与生产都切到整目录任务）
+
+需求方要求 dev 与生产都切换，已于 2026-09-07 完成：分支快进合入 BitBucket master（`afdbd6dc29`），`ide-provision-whole-dir` 任务经 `config.xml` POST 改回 `*/master`（第一次 POST 返回 500 且未生效；重试返回 200——不要信任状态码，要回读生效配置），master 构建对 14410 的探测回 `reconcile healthy`，随后编辑 `/opt/ide-provision/portal.yaml` 为 `jenkins.job: ide-provision-whole-dir` 并 `docker restart ide-portal`（portal 经代理回 401，监听日志正常）。2026-09-06 的 dev portal 实例已不存在（`/tmp/portal-dev.yaml` 已清理，8188 无监听）：下次拉起时对其 `portal.yaml` 做同样的一键修改即可，这就是 dev 侧的全部操作。
+
+回滚：把 `/opt/ide-provision/portal.yaml` 的 `jenkins.job` 改回 `ide-provision` 并重启 `ide-portal`；无论怎么切，存量容器都不受影响。
+
 ## 当前状态
 
 `ide-14410` 以整目录布局运行中，健康（401 = 门禁在保护），数据位于 `/data/ide/14410/`。`ide-14409` 与生产 portal 未受影响。Jenkins 任务 `ide-provision-whole-dir` 已创建并验证；portal 仍指向 `ide-provision`。待需求方评审后再动 `provision.sh`、`docs/containerization/0008` 或 portal 配置。

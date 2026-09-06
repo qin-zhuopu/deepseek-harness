@@ -61,6 +61,12 @@ The whole layout is now a switchable second provisioning path, with zero portal 
 
 **Portal switch = one `portal.yaml` key.** `jenkins.job` is already a fail-loud config field (`apps/ide-portal/src/config.ts`); the portal is only a Jenkins API client, so switching layouts on the host is: edit `/opt/ide-provision/portal.yaml` (`jenkins.job: ide-provision-whole-dir`), then `docker restart ide-portal`. Both jobs take identical parameters, and `probe`/`start` are layout-agnostic, so existing users are unaffected; only newly created containers land on the whole-dir layout. Switch back = restore the key. The production `portal.yaml` was left on `ide-provision` pending the requester's go-ahead; merge the branch before switching, since the job builds from SCM.
 
+## Switch executed (both environments on the whole-dir job)
+
+The requester ordered the switch for dev and production. Completed on 2026-09-07: the branch was fast-forwarded to BitBucket master (`afdbd6dc29`), the `ide-provision-whole-dir` job was repointed to `*/master` via a `config.xml` POST (the first POST answered 500 and did not apply; the retry returned 200 — always re-read the live config instead of trusting the status code), a master-built probe of uid 14410 came back `reconcile healthy`, and `/opt/ide-provision/portal.yaml` was edited to `jenkins.job: ide-provision-whole-dir` followed by `docker restart ide-portal` (portal answers 401 through the proxy, listening log clean). The dev portal instance from 2026-09-06 no longer exists (`/tmp/portal-dev.yaml` gone, 8188 not listening): when it is brought up again, its `portal.yaml` gets the same one-key change — that is the entire dev switch.
+
+Rollback: restore `jenkins.job: ide-provision` in `/opt/ide-provision/portal.yaml` and restart `ide-portal`; existing containers are untouched either way.
+
 ## Current state
 
 `ide-14410` is running on the whole-directory layout, healthy (401 = gate protecting), data at `/data/ide/14410/`. `ide-14409` and the production portal are untouched. Jenkins job `ide-provision-whole-dir` exists and is verified; the portal still points at `ide-provision`. Awaiting the requester's requirements decision before touching `provision.sh`, `docs/containerization/0008`, or the portal config.

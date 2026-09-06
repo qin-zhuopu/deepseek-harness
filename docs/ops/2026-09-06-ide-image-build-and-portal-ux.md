@@ -59,6 +59,12 @@ docker run -d --name ide-portal --restart unless-stopped --network dc_default \
 
 Lesson: `docker inspect` the live container and save its full Env/Mounts/Cmd before touching production. Other lessons: `pkill -f <pattern>` matches its own `bash -c` command line and self-kills — use the bracket trick (`pkill -f "dsh[ ]web"`); Jenkins API parameters must be form-encoded; never omit `curl -m`.
 
+## OIDC JWT storage and portal API protection (verified live)
+
+After the sign-in round-trip, the IAM id_token (implicit flow: the token arrives in the URL fragment and the same-origin relay page POSTs it back) is **signature-verified** and then written into the `dsh_token` cookie: HttpOnly (unreadable from page JS), SameSite=Lax, Path=/, Max-Age equal to the token's own exp. The server keeps **no session state**: every request re-verifies the JWT taken from the cookie (or the `Authorization: Bearer <id_token>` header, for scripted clients; the header wins over the cookie) — JWKS signature plus `iss` (iam.jereh.cn), `aud` (this deployment's clientId), and `exp`; on a JWK rotation a failed verification forces one fresh key read before rejecting; offline deployments update `/opt/ide-provision/iam-trust.json`. The same token model guards the gate inside each user's IDE container, whose cookie is scoped to that hostname — the user token lives only in the user's own container (0008 SR4).
+
+Every portal REST API sits behind that verification gate (`guard()` in `server.ts` covers everything except `/login`, `/auth/callback`, and `/logout`): on dev, anonymous or forged-token requests to `/api/state`, `/api/events`, `POST /api/check`, and `POST /api/provision` all answered 401, HTML navigations 302 to `/login`, and static assets sit behind the same gate. Scripted use: `curl -H "Authorization: Bearer <valid id_token>" http://ide.jereh-pe.cn/api/state`. Logout clears the cookie (`/logout`).
+
 ## Current state
 
 Production portal = commit 2a7b697fd7 (instant-open version, 77 tests green); the three-button version (from 4eecdebbc1) is verified in local dev and awaiting release. ide-14409 is provisioned and healthy (created by clicking 启动我的IDE on the dev page through the real chain, build #125). The IDE image dsh-aio:dev-amd64 = build 37 and boots fully automatically.

@@ -59,6 +59,12 @@ docker run -d --name ide-portal --restart unless-stopped --network dc_default \
 
 教训:改生产前先 `docker inspect` 存下现有容器的完整 Env/Mounts/Cmd 再动手。其他教训:`pkill -f <模式>` 会匹配自己的 `bash -c` 命令行自杀,用 `pkill -f "dsh[ ]web"` 类括号写法规避;Jenkins API 参数必须表单编码;`curl -m` 别省。
 
+## OIDC JWT 的存放与门户 API 防护(实测)
+
+登录往返后,IAM 的 id_token(implicit flow,token 经 URL fragment 由同源 relay 页 POST 回来)被门户**验签后**写入 cookie `dsh_token`:HttpOnly(页面 JS 不可读)、SameSite=Lax、Path=/、Max-Age=token 自身的 exp。服务端**不存任何会话状态**:每个请求都从 cookie(或 `Authorization: Bearer <id_token>`,脚本客户端用,优先级高于 cookie)取出 JWT 重新验签——JWKS 签名 + `iss`(iam.jereh.cn)+ `aud`(本应用 clientId)+ `exp`,JWKS 轮换时验签失败会强制刷新一次密钥再拒;离线部署(trustFile)更新 `/opt/ide-provision/iam-trust.json` 即可。同一个 token 模型也用于每个用户 IDE 容器内的闸门,其 cookie 按主机名收窄,用户 token 只存在用户自己的容器里(0008 SR4)。
+
+门户的全部 REST API 都在验签闸后(`server.ts` 的 `guard()` 挡住除 `/login`、`/auth/callback`、`/logout` 外的一切):dev 实测匿名或伪造 token 访问 `/api/state`、`/api/events`、`POST /api/check`、`POST /api/provision` 全部 401,HTML 导航 302 到 `/login`,静态资源同闸。脚本调门户 API 的姿势:`curl -H "Authorization: Bearer <有效id_token>" http://ide.jereh-pe.cn/api/state`。登出即清 cookie(`/logout`)。
+
 ## 当前状态
 
 生产门户 = 提交 2a7b697fd7(秒开版,77 tests 绿);三按钮版(4eecdebbc1 起)已本地 dev 验证待发布。ide-14409 已开通健康(dev 页面点"启动我的IDE"走真实链路创建,build #125)。IDE 镜像 dsh-aio:dev-amd64 = build 37,开机全自动。

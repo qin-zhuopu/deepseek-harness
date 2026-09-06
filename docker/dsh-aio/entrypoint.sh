@@ -289,4 +289,7 @@ if [ -n "${DSH_AUTH_SECRET:-}" ]; then
   log "JWT gate enabled (auth-jwt patch overlay)"
 fi
 
-exec pnpm dsh web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}" "${GATE_ARGS[@]}"
+# The launcher stops parsing its own flags at the first token it does not
+# know, so the overlay --patch flags must come immediately after `web`,
+# before any app flag (--no-open etc.).
+exec pnpm dsh web "${GATE_ARGS[@]}" "${IAM_ARGS[@]}" --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

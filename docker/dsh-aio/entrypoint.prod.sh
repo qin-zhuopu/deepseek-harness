@@ -265,4 +265,4 @@ if [ -n "${DSH_AUTH_SECRET:-}" ]; then
   log "JWT gate enabled (auth-jwt patch overlay)"
 fi
 
-exec node apps/cli/lib/bin.js web --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}" "${IAM_ARGS[@]}" "${GATE_ARGS[@]}"
+exec node apps/cli/lib/bin.js web "${GATE_ARGS[@]}" "${IAM_ARGS[@]}" --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

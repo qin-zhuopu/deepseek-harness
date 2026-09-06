@@ -52,7 +52,11 @@ RUN pnpm fetch
 COPY . .
 
 # Install (immutable) from the warmed store.
-RUN pnpm install --frozen-lockfile --offline
+RUN pnpm install --frozen-lockfile
+# Runtime (tsx source dispatch) resolves workspace packages through node_modules
+# links; `install --offline` after fetch was observed to skip them. Fail the
+# build, not the container boot, if a link is missing.
+RUN test -d node_modules/@deepseek-ai/dsh-client-ui-vnc-preview
 
 # .git now ships in the image (see .dockerignore) so the dev container can
 # git pull/diff. The build still takes the commit as an explicit arg rather

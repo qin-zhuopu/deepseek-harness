@@ -51,7 +51,11 @@ COPY . .
 
 # Install from the warmed store (lockfile may carry local mirror/policy
 # tweaks); fetch's store makes this a link step unless the lockfile moved.
-RUN pnpm install --no-frozen-lockfile --offline
+RUN pnpm install --no-frozen-lockfile
+# Runtime (tsx source dispatch) resolves workspace packages through node_modules
+# links; `install --offline` after fetch was observed to skip them. Fail the
+# build, not the container boot, if a link is missing.
+RUN test -d node_modules/@deepseek-ai/dsh-client-ui-vnc-preview
 
 # The build context has no .git, so provide the source commit explicitly.
 # client-build-environment.ts uses this instead of calling `git rev-parse HEAD`.

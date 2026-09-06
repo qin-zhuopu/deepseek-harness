@@ -20,3 +20,4 @@ past it.
 | [0006](0006-aio-build-deploy-scripts.md) | The aio build/ci/deploy scripts: what each one does and when to use it |
 | [0007](0007-per-user-ide-requirements.md) | Per-user IDE service on demand: requirements, user stories, sequence, open items |
 | [0008](0008-per-user-ide-design.md) | Per-user IDE service on demand: portal, Jenkins executor, docker-run recipe, health check |
+| [0009](0009-jwt-login-gate-deployment.md) | Deploying the JWT login gate: compose wiring, verification, rollback |

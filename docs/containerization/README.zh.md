@@ -18,3 +18,4 @@
 | [0006](0006-aio-build-deploy-scripts.zh.md) | aio 的 build/ci/deploy 脚本:各干什么、何时用 |
 | [0007](0007-per-user-ide-requirements.zh.md) | 按需开通每用户 IDE 服务:需求、用户故事、时序、未决事项 |
 | [0008](0008-per-user-ide-design.zh.md) | 按需开通每用户 IDE 服务:Portal、Jenkins 执行器、docker-run 配方、健康检查 |
+| [0009](0009-jwt-login-gate-deployment.zh.md) | 部署 JWT 登录门:compose 接线、验证、回滚 |

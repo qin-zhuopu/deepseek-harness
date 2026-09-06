@@ -29,14 +29,21 @@ let seenSeq = 0
 const logTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
 function renderState(event) {
-  const checking = checkBtn.disabled && event.state === 'NO_SERVICE'
-  statusEl.textContent = checking ? '正在检查服务状态…' : (event.state === 'NO_SERVICE' ? '未发现运行中的 IDE,点击“检查并开通”创建。' : (LABELS[event.state] ?? event.state))
-  statusEl.className = 'state ' + event.state.toLowerCase()
+  // While the arrival check runs, the snapshot may be stale (e.g. READY from
+  // a previous visit): show 检查中 instead of a banner the probe may overturn.
+  if (event.checking) {
+    statusEl.textContent = '正在检查服务状态…'
+    statusEl.className = 'state checking'
+  } else {
+    statusEl.textContent = event.state === 'NO_SERVICE' ? '未发现运行中的 IDE,点击“检查并开通”创建。' : (LABELS[event.state] ?? event.state)
+    statusEl.className = 'state ' + event.state.toLowerCase()
+  }
   if (event.ideUrl) openBtn.href = event.ideUrl
-  openBtn.hidden = !(event.ideUrl && (event.state === 'READY' || event.state === 'HEALTHY'))
-  checkBtn.hidden = event.state !== 'NO_SERVICE'
-  if (event.state !== 'NO_SERVICE') checkBtn.disabled = false
-  retryBtn.hidden = !(event.state === 'FAILED' || event.state === 'TIMEOUT')
+  const settled = !event.checking
+  openBtn.hidden = !(settled && event.ideUrl && (event.state === 'READY' || event.state === 'HEALTHY'))
+  checkBtn.hidden = !(settled && event.state === 'NO_SERVICE')
+  if (settled && event.state !== 'NO_SERVICE') checkBtn.disabled = false
+  retryBtn.hidden = !(settled && (event.state === 'FAILED' || event.state === 'TIMEOUT'))
 }
 
 function renderStep(step) {

@@ -97,6 +97,35 @@ describe('cold path (FR4, US1)', () => {
   })
 })
 
+describe('arrival check (fast open, 2026-09-06)', () => {
+  it('each reconcile renders exactly one chain; seq stays monotonic across the reset', async () => {
+    const { orchestrator, jenkins } = await harness()
+    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    await orchestrator.reconcile('14409')
+    const firstSeqs = orchestrator.run('14409').steps.map(s => s.seq)
+    await orchestrator.reconcile('14409')
+    const run = orchestrator.run('14409')
+    // The second check shows one fresh chain (no replayed history drowning the
+    // new verdict) and its seqs continue past the first check's.
+    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查结论'])
+    expect(run.snapshot.state).toBe('NO_SERVICE')
+    expect(Math.min(...run.steps.map(s => s.seq))).toBeGreaterThan(Math.max(...firstSeqs))
+  })
+
+  it('arrive surfaces a probe failure as a step without flipping the machine state', async () => {
+    const { orchestrator, jenkins } = await harness()
+    // A probe build with no reconcile marker throws inside reconcile.
+    jenkins.script('probe', { console: '', result: 'SUCCESS' })
+    await orchestrator.arrive('14409')
+    const run = orchestrator.run('14409')
+    expect(orchestrator.stateEvent('14409').checking).toBe(false)
+    expect(run.steps.map(s => s.step)).toEqual(['检查'])
+    expect(run.steps[0]?.status).toBe('fail')
+    expect(run.snapshot.state).toBe('NO_SERVICE')
+  })
+})
+
 describe('warm path (FR3)', () => {
   it('reconcile finding a healthy container returns HEALTHY without provisioning', async () => {
     const { orchestrator, jenkins } = await harness()

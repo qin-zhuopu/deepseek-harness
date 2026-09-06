@@ -49,6 +49,8 @@ export function isStepName(value: string): value is StepName {
 export interface StateEvent {
   type: 'state'
   state: MachineSnapshot['state']
+  /** True while the arrival check runs; the page shows 检查中 instead of the stale banner. */
+  checking: boolean
   /** Absolute IDE url once the run reaches READY; undefined before. */
   ideUrl: string | undefined
   /** Jenkins build owned by this run, for the console link (FR8). */

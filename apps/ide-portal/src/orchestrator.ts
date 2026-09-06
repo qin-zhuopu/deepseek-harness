@@ -109,6 +109,7 @@ export class Orchestrator {
     return {
       type: 'state',
       state: run.snapshot.state,
+      checking: run.checking,
       ideUrl: ready ? ideUrl(this.config, uid) : undefined,
       build: run.snapshot.build,
     }
@@ -120,7 +121,7 @@ export class Orchestrator {
 
   private appendStep(uid: string, step: string, status: StepEvent['status'], detail: string): void {
     const run = this.ensure(uid)
-    const event: StepEvent = { type: 'step', seq: run.steps.length + 1, step, status, detail, atMs: this.clock.now() }
+    const event: StepEvent = { type: 'step', seq: ++run.seq, step, status, detail, atMs: this.clock.now() }
     run.steps.push(event)
     run.updatedMs = event.atMs
     this.emit(uid, event)
@@ -150,6 +151,27 @@ export class Orchestrator {
   }
 
   /**
+   * Arrival check (requester, 2026-09-06: fast open + streamed progress): the
+   * page serves immediately and the reconcile runs behind the request. Unlike
+   * the button flow, a probe failure surfaces as a visible step instead of a
+   * machine transition — the host, not a transient Jenkins outage, is the
+   * truth the banner reflects.
+   */
+  async arrive(uid: string): Promise<void> {
+    const run = this.ensure(uid)
+    run.checking = true
+    this.emit(uid, this.stateEvent(uid))
+    try {
+      await this.reconcile(uid)
+    } catch (error) {
+      this.appendStep(uid, '检查', 'fail', `探针未完成: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      run.checking = false
+      this.emit(uid, this.stateEvent(uid))
+    }
+  }
+
+  /**
    * Reconcile (FR6): run the probe job and adopt what the host reports. The
    * result replaces any stale in-memory state unless a provisioning run is
    * in flight for this uid.
@@ -167,8 +189,10 @@ export class Orchestrator {
     const run = this.ensure(uid)
     run.snapshot = { state: stateFromReconcile(reconcile), build, failedStep: undefined }
     run.updatedMs = this.clock.now()
-    // The check reads as a chain the user asked for (2026-09-06): identity,
-    // the agreed domain, then the host-reported facts, then the verdict.
+    // Each check renders as one chain (requester, 2026-09-06): a fresh arrival
+    // must not replay the day's older chains, or a stale 正常 verdict drowns
+    // the new one. `seq` stays monotonic, so connected pages dedup correctly.
+    run.steps = []
     this.appendStep(uid, '工号', 'info', uid)
     this.appendStep(uid, '域名', 'info', ideUrl(this.config, uid))
     for (const marker of markers) {

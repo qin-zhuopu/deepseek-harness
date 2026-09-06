@@ -135,15 +135,11 @@ export function createPortalServer(
     }
 
     if (path === '/' && req.method === 'GET') {
-      // The entry always auto-checks (requester decision, 2026-09-06: read-only
-      // operations run without a click): the reconcile probe reads Docker state
-      // and changes nothing. A healthy answer stays on the page — the status
-      // line and the open button render, and the jump stays with the user's
-      // click. A failed probe (Jenkins unreachable) still renders the page; the
-      // button-driven run reports the error in the log.
-      try {
-        await orchestrator.reconcile(uid)
-      } catch { /* page renders the last known state */ }
+      // Fast open (requester, 2026-09-06): the HTML answers immediately and
+      // the arrival check runs behind the request — its chain streams to the
+      // page over /api/events while the user already sees it. The reconcile
+      // probe is read-only; provisioning stays behind the check button.
+      void orchestrator.arrive(uid)
       serveStatic('/', res)
       return
     }

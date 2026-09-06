@@ -124,15 +124,15 @@ describe('guard', () => {
   })
 })
 
-describe('entry auto-checks on arrival (read-only)', () => {
-  it('GET / with a healthy service runs the probe, renders the page, and lands on HEALTHY — no 302, no provisioning', async () => {
+describe('entry auto-checks on arrival (read-only, fast open)', () => {
+  it('GET / with a healthy service renders the page immediately; the probe lands HEALTHY behind the request', async () => {
     const h = await start()
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     const direct = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' }, redirect: 'manual' })
     expect(direct.status).toBe(200)
     expect(await direct.text()).toContain('检查并开通我的 IDE')
+    const snapshot = await pollChecked(h)
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
-    const snapshot = await (await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })).json() as StateSnapshot
     expect(snapshot.state.state).toBe('HEALTHY')
     expect(snapshot.state.ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
   })
@@ -143,9 +143,27 @@ describe('entry auto-checks on arrival (read-only)', () => {
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
     expect(await page.text()).toContain('检查并开通我的 IDE')
+    const snapshot = await pollChecked(h)
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
-    const snapshot = await (await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })).json() as StateSnapshot
     expect(snapshot.state.state).toBe('NO_SERVICE')
+  })
+
+  it('GET / answers before the probe finishes — the check streams over SSE, never blocking the HTML', async () => {
+    const h = await start()
+    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    // Hold the trigger until the page has provably answered without it.
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const unheld = h.jenkins.trigger.bind(h.jenkins)
+    h.jenkins.trigger = async (params) => { await held; return await unheld(params) }
+    const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
+    expect(page.status).toBe(200)
+    expect(h.jenkins.triggered).toHaveLength(0)
+    expect(await page.text()).toContain('IDE 门户')
+    release()
+    const snapshot = await pollChecked(h)
+    expect(snapshot.state.state).toBe('HEALTHY')
+    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
   })
 })
 
@@ -181,8 +199,19 @@ describe('cold path page (FR4, FR5)', () => {
 
 /** The /api/state snapshot as the page consumes it. */
 interface StateSnapshot {
-  state: { state: string; ideUrl: string | undefined }
+  state: { state: string; checking: boolean; ideUrl: string | undefined }
   steps: { step: string }[]
+}
+
+/** Poll /api/state until the arrival check settles (checking=false with a rendered chain). */
+async function pollChecked(h: Harness, tries = 200): Promise<StateSnapshot> {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const response = await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })
+    const snapshot = await response.json() as StateSnapshot
+    if (!snapshot.state.checking && snapshot.steps.length > 0) return snapshot
+    await new Promise<void>((resolve) => { setTimeout(resolve, 5) })
+  }
+  throw new Error('arrival check did not settle')
 }
 
 /** Poll /api/state until the run reaches a terminal state (the detached POST drives it). */

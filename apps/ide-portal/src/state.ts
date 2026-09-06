@@ -68,6 +68,10 @@ export function stateFromReconcile(reconcile: Reconcile): ServiceState {
 export interface Run {
   snapshot: MachineSnapshot
   steps: StepEvent[]
+  /** Monotonic step counter; survives the per-check step-log reset so replay dedup stays correct. */
+  seq: number
+  /** True while the arrival check is in flight (the page shows 检查中, not a stale banner). */
+  checking: boolean
   /** Wall clock of the last state change, for display only. */
   updatedMs: number
 }
@@ -77,6 +81,8 @@ export function freshRun(): Run {
   return {
     snapshot: { state: 'NO_SERVICE', build: undefined, failedStep: undefined },
     steps: [],
+    seq: 0,
+    checking: false,
     updatedMs: Date.now(),
   }
 }

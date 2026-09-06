@@ -292,4 +292,7 @@ fi
 # The launcher stops parsing its own flags at the first token it does not
 # know, so the overlay --patch flags must come immediately after `web`,
 # before any app flag (--no-open etc.).
-exec pnpm dsh web "${GATE_ARGS[@]}" "${IAM_ARGS[@]}" --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"
+# node needs --expose-internals: the loader's internal-module access (HMR
+# service et al.) prefers it over the native fallback, and without it the
+# cordis-plugin-hmr entry refuses to load and web exits before listening.
+exec node --expose-internals --import tsx/esm apps/cli/src/bin.ts web "${GATE_ARGS[@]}" "${IAM_ARGS[@]}" --no-open --port "${DSH_PORT}" "${TRUST_ARGS[@]}"

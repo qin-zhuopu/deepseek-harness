@@ -49,7 +49,7 @@ token **不含 email,也不含 group claim**。因此任何"只允许部分员�
 - **FR7 每用户单飞**:两个标签页或两台设备同时进入,只能产生一次开通动作;第二个观看者订阅同一份实时日志。
 - **FR8 失败上报**:某步失败即终止流程,在日志面板点名失败步骤及其错误,并提供从 reconcile 后状态续跑的重试。
 - **FR9 数据跨重建存活**:用户工作区放在命名卷里;重建或升级容器绝不销毁用户数据。
-- **FR10 模型 key 注入**:平台 LLM key 存放在 Web 项目后端的 `.env` 中;create 动作把它带到宿主机,并作为 `NR_API_KEY` 注入新容器的环境,agent 从首次启动起就能调用 LLM。重启与探测都不需要这个 key——它已经是容器存储配置的一部分。
+- **FR10 模型 key 注入**:平台 LLM key 存放在 Jenkins 全局凭据库的 Secret text 凭据 `ide-model-key` 中;create 阶段的 build 绑定它,并作为 `NR_API_KEY` 注入新容器的环境,agent 从首次启动起就能调用 LLM。Portal 不持有、也不发送 key。重启与探测都不需要这个 key——它已经是容器存储配置的一部分。
 
 ## 用户故事
 
@@ -148,7 +148,7 @@ sequenceDiagram
 - **SR2 可达性**:`ide-<uid>.jereh-pe.cn` 可被枚举(uid 即工号),且 C4 意味着裸 HTTP。用户容器被未认证触达等于远程代码执行。Portal 的每条路由都必须要求会话 cookie,而用户容器自身的认证方案是未决事项 O2(建议在容器内挂 OIDC 闸门)。
 - **SR3 执行权限**:只有 Jenkins 持有宿主机凭据;Portal 只持有一个 Jenkins 触发 token,绝不持有 SSH 凭据。
 - **SR4 token 处理**:OIDC `id_token` 只留在 Portal 服务端;绝不放进 URL query,也绝不注入被开通容器的环境。是否把它交给用户容器(闸门的 cookie 模型做的正是这件事)由 O2 明确决定,不允许实现自行漂移。
-- **SR5 模型 key 的暴露面**:被注入的 key 对任何能 `docker exec` 进用户容器的人(也就是容器内的用户)和宿主机上能 `docker inspect` 的人可读。这被接受,因此该 key 必须是可吊销、有消费上限的平台 key;且绝不允许以明文 console 行、或以宿主机进程列表可见的命令行参数形式传输——传输规则见 [0008](0008-per-user-ide-design.zh.md)(O3 连同这些规则一并解决)。
+- **SR5 模型 key 的暴露面**:被注入的 key 对任何能 `docker exec` 进用户容器的人(也就是容器内的用户)和宿主机上能 `docker inspect` 的人可读。这被接受,因此该 key 必须是可吊销、有消费上限的平台 key;且绝不允许以明文 console 行、命令行参数、或以构建参数(会被 Jenkins 持久化到构建记录)的形式传输——key 的家是 Jenkins Secret text 凭据,传输规则见 [0008](0008-per-user-ide-design.zh.md)(O3 连同这些规则一并解决)。
 
 ## 非功能需求
 
@@ -165,7 +165,7 @@ O4、O5、O7 由需求方明确搁置(2026-09-05):先交付主流程(US1–US5),
 |---|---|---|
 | O1 | ~~哪个 claim 携带 uid~~ —— 已解决:取 `sub`(= `userId`),见"身份 claim"。剩余的一半:进入白名单——与 O4/O5/O7 同一决定搁置;第一版放行公司 SSO 认证通过的全部身份。 | 确有排除需求时再加 Portal 侧的工号名单文件。 |
 | O2 | 用户容器自身是否要求登录。 | 要——容器内挂随附的 OIDC 闸门,跳转后经 IAM 的 `usk` 会话静默完成二次认证。零登记成本:每个容器自己拼 `redirect_uri=http://ide-<uid>.jereh-pe.cn/auth/callback`,IAM 接受未登记的回调(C10)。 |
-| O3 | ~~用谁的模型 API key~~ —— 已解决(需求方):平台统一一把 key,唯一来源是 Web 项目后端的 `.env`,create 时经 Jenkins 注入每个容器(FR10)。剩余:选定这把可吊销、有消费上限的 key 的值与保管人(SR5)。 | 为这支容器舰队单独发一把平台 key,不要用个人 key。 |
+| O3 | ~~用谁的模型 API key~~ —— 已解决(需求方):平台统一一把 key,唯一家是 Jenkins Secret text 凭据 `ide-model-key`,create 阶段的 build 绑定它注入每个容器(FR10)。剩余:确认这把 key 可吊销、有消费上限(SR5)。 | 为这支容器舰队单独发一把平台 key,不要用个人 key。 |
 | O4 | 闲置回收:阈值、stop 还是 remove、谁来调度。 | **保持开放,已搁置**:主流程跑通后再议。届时的建议:距最后会话活动 N 小时后 stop(保留卷)。 |
 | O5 | `*.jereh-pe.cn` 的 TLS(泛域名证书走 DNS-01)。 | **保持开放,已搁置**:主流程跑通后再议;舰队扩大后强烈建议做。 |
 | O6 | 多宿主机扩展。 | 范围外;把宿主机留在 Portal 配置里,将来加 host 映射是增量改动。 |

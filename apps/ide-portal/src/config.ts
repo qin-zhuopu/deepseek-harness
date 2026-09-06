@@ -1,7 +1,9 @@
 /**
- * Portal deployment configuration: one YAML file plus the `.env` secrets,
- * every value explicit (0008 Configuration). Loading is fail-loud: a missing
- * or malformed value refuses startup rather than defaulting silently.
+ * Portal deployment configuration: one YAML file, every value explicit
+ * (0008 Configuration). Loading is fail-loud: a missing or malformed value
+ * refuses startup rather than defaulting silently. The model key is absent
+ * by design: the create-stage Jenkins build binds the Jenkins credential
+ * itself, so the portal never reads or sends a key (FR10, SR5).
  * @module
  */
 
@@ -58,8 +60,6 @@ export interface PortalConfig {
   uid: { claim: 'sub'; crossCheckClaim: string; pattern: string }
   /** Pinned image tag (C6); never `latest`. */
   imageTag: string
-  /** Model key source (FR10): `.env` file plus variable name, read at create only. */
-  modelKey: { envFile: string; varName: string }
   jenkins: JenkinsConfig
   iam: IamConfig
   health: HealthConfig
@@ -110,7 +110,6 @@ export function parsePortalConfig(text: string): PortalConfig {
   if (doc.errors.length > 0) throw new Error(`portal config: ${doc.errors[0]?.message ?? 'parse error'}`)
   const raw = doc.toJS() as Record<string, unknown>
   const uid = section(raw, 'uid')
-  const modelKey = section(raw, 'modelKey')
   const jenkins = section(raw, 'jenkins')
   const iam = section(raw, 'iam')
   const health = section(raw, 'health')
@@ -126,7 +125,6 @@ export function parsePortalConfig(text: string): PortalConfig {
     entryHost: need(raw, 'entryHost', 'root'),
     uid: { claim: 'sub', crossCheckClaim: need(uid, 'crossCheckClaim', 'uid'), pattern },
     imageTag: need(raw, 'imageTag', 'root'),
-    modelKey: { envFile: need(modelKey, 'envFile', 'modelKey'), varName: need(modelKey, 'varName', 'modelKey') },
     jenkins: {
       url: need(jenkins, 'url', 'jenkins').replace(/\/+$/, ''),
       job: need(jenkins, 'job', 'jenkins'),
@@ -144,32 +142,6 @@ export function parsePortalConfig(text: string): PortalConfig {
     port: raw['port'] === undefined ? 8080 : needNum(raw, 'port', 'root'),
     autoCheck: raw['autoCheck'] === undefined ? false : needBool(raw, 'autoCheck', 'root'),
   }
-}
-
-/** Parse one `.env`-style file (KEY=VALUE lines, `#` comments) into a record. */
-export function parseEnvFile(text: string): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const line of text.split('\n')) {
-    const trimmed = line.trim()
-    if (trimmed === '' || trimmed.startsWith('#')) continue
-    const eq = trimmed.indexOf('=')
-    if (eq <= 0) continue
-    out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
-  }
-  return out
-}
-
-/** Read the model key from the configured `.env` (FR10: the only home), fail-loud when absent. */
-export function readModelKey(config: PortalConfig): string {
-  let text: string
-  try {
-    text = readFileSync(config.modelKey.envFile, 'utf8')
-  } catch {
-    throw new Error(`portal config: model key file ${config.modelKey.envFile} is unreadable (FR10)`)
-  }
-  const value = parseEnvFile(text)[config.modelKey.varName]
-  if (value === undefined || value === '') throw new Error(`portal config: ${config.modelKey.varName} missing from ${config.modelKey.envFile} (FR10)`)
-  return value
 }
 
 /** Read the portal config file from disk. */

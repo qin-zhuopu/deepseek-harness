@@ -16,7 +16,7 @@ Jenkins 是唯一的宿主机执行器。进度通道就是构建控制台:`Jenk
 
 按 uid 的正确性分三层:门户进程内 busy 集合(joiner 等 owner 的终态,绝不重复触发)、Jenkins `disableConcurrentBuilds`(宿主变更全局串行)、脚本对 `docker run --name ide-<uid>` 撞名的容忍(两个竞争构建收敛为「已创建 → 继续 start/probe」)。每个 uid 一个标记文件(`--state` 目录,具名卷)记录最后触发的构建;启动时门户重新挂上未完成的构建继续轮询,门户重启既不丢运行也不丢日志(N3)。
 
-uid 取 `sub` 并与 `userId` 交叉核对、过配置的正则,两层都查——否则门户拒绝推导域名(SR1),宿主脚本在任何插值前再验一遍(Jenkins 参数白名单之后的纵深)。平台 key(FR10)的路径:后端 `.env` → 掩码的 `password()` Jenkins 参数 → ssh stdin → 宿主 0600 env 文件 → `docker run --env-file` → 立刻删除;只有 `ACTION=create` 读取,任何一层都不会泄漏进控制台行或 argv(SR5)。
+uid 取 `sub` 并与 `userId` 交叉核对、过配置的正则,两层都查——否则门户拒绝推导域名(SR1),宿主脚本在任何插值前再验一遍(Jenkins 参数白名单之后的纵深)。平台 key(FR10)的家只有 Jenkins Secret text 凭据 `ide-model-key`:create 阶段的 build 用 `withCredentials` 绑定它,在 workspace 以 `umask 077` 落成文件,再经 ssh stdin → 宿主 0600 env 文件 → `docker run --env-file` → 立刻删除;门户不持有也不发送 key,凭据未绑定就没有 create 能成功,任何一层都不会泄漏进控制台行、argv 或持久化的构建参数(SR5)。
 
 ## 后果
 

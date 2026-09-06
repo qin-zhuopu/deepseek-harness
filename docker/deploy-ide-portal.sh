@@ -6,10 +6,11 @@
 #   ./docker/deploy-ide-portal.sh [-h host] [-d domain]
 #
 # Prerequisites on the host (all already true for ide-provision):
-#   - /opt/ide-provision/ide-portal.env with IDE_JENKINS_TOKEN=<api token>, and
-#     /opt/ide-provision/model-key.env with NR_API_KEY=<platform key> (both 0600,
-#     admin-owned) — never baked; the key file reaches the portal only as the
-#     read-only mount portal.yaml names, never as a portal process env var;
+#   - /opt/ide-provision/ide-portal.env with IDE_JENKINS_TOKEN=<api token>
+#     (0600, admin-owned) — never baked. The platform model key is NOT a
+#     portal file or env var: it lives only in the Jenkins Secret text
+#     credential `ide-model-key`, bound by the create-stage build
+#     (0008 Model key flow, FR10/SR5);
 #   - /opt/ide-provision/portal.yaml (start from docker/ide-portal/portal.example.yaml);
 #   - when the host cannot reach the IAM, /opt/ide-provision/iam-trust.json
 #     (0600, admin-owned) with the IAM's two published documents captured from a
@@ -56,7 +57,6 @@ docker run -d --name ide-portal \
   -v ide-portal-state:/var/lib/ide-portal \
   -v /opt/ide-provision/portal.yaml:/etc/ide-portal/portal.yaml:ro \
   $TRUST_MOUNT \
-  -v /opt/ide-provision/model-key.env:/run/secrets/ide-model.env:ro \
   --env-file /opt/ide-provision/ide-portal.env \
   -e VIRTUAL_HOST=$DOMAIN -e VIRTUAL_PORT=8080 -e HTTPS_METHOD=noredirect \
   $IMAGE_TAG

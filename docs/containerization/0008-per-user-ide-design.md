@@ -50,25 +50,27 @@ State machine transitions follow [0007](0007-per-user-ide-requirements.md). The 
 
 ## Model key flow (FR10, SR5)
 
-The key has one human-managed home: the portal backend's `.env` (`NR_API_KEY=...`, next to the other secrets, never committed). Only `ACTION=create` moves it, and the path is chosen so the value never appears in an argv line, a console line, or a stored shell history:
+The key has one home: the Jenkins Secret text credential `ide-model-key` in the global credentials store, maintained by whoever administers Jenkins (O3). The portal holds and sends no key: it only triggers `ACTION=create`. The path is chosen so the value never appears in an argv line, a console line, a build parameter, or a stored shell history:
 
-1. The portal reads `.env` at trigger time and passes it as the masked `MODEL_KEY` build parameter.
-2. On the host the job writes a one-shot env file — `umask 077; printf 'NR_API_KEY=%s\n' "$MODEL_KEY" > /run/ide-<uid>.env` — passes it to `docker run --env-file`, and removes it immediately after; the value reaches the daemon as file content, not as a visible argument (`docker run -e NR_API_KEY=$KEY` would expose it to every local user via `ps` and to `docker history`-style process inspection).
-3. The container stores the env in its own configuration, so `start`/`probe`/`stop` runs never carry the key again, and the portal page, step markers, and Jenkins console never print it (the masked parameter covers the console).
+1. The create-stage build binds the credential with `withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')])` and fails loud when the binding is empty.
+2. Inside the binding the job stages the value in a workspace file under `umask 077` and pipes that file through the ssh session's stdin to `provision.sh`, which unlinks any residue in a trap; the Jenkins `post` block wipes the staged file on every path.
+3. On the host `provision.sh` writes a one-shot env file — `umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /run/ide-<uid>.env` — passes it to `docker run --env-file`, and removes it immediately after; the value reaches the daemon as file content, not as a visible argument (`docker run -e NR_API_KEY=$KEY` would expose it to every local user via `ps`).
+4. The container stores the env in its own configuration, so `start`/`probe`/`stop` runs never carry the key again, and the portal page, step markers, and Jenkins console never print it.
 
-Accepted residual risks (SR5): Jenkins build records persist build parameters, so anyone who can read the `ide-provision` build history can read the key — mitigated by restricting read access on that job; and every user container's own shell can read the key via `docker exec`/`env`, so the key is fleet-wide, revocable, and spend-capped. If parameter persistence ever becomes unacceptable, the alternative is pre-placing a 600 env file on the host (the `~/dsh-aio.env` pattern `docker/deploy-dsh-aio-arm64.sh` already uses) and dropping `MODEL_KEY` — the job recipe otherwise does not change.
+Accepted residual risks (SR5): every user container's own shell can read the key via `docker exec`/`env`, so the key is fleet-wide, revocable, and spend-capped; Jenkins admins can read the credential store by definition. A create with an unset credential fails at the key step with a named error rather than producing a keyless container.
 
 ## Jenkins executor
 
-One parameterized pipeline job, defined by [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) (same Pipeline-from-SCM pattern as `dsh-aio-dev-build` in [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md)), all host work inside `sshagent(credentials: ['ssh'])` as `admin`; the host actions live in [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh), which the job ships to `/opt/ide-provision/` on every run and executes over `ssh ... bash -s` (the create key rides stdin, never argv):
+One parameterized pipeline job, defined by [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) (same Pipeline-from-SCM pattern as `dsh-aio-dev-build` in [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md)), all host work inside `sshagent(credentials: ['ssh'])` as `admin`; the host actions live in [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh), which the job ships to `/opt/ide-provision/` on every run and executes over `ssh ... bash -s` (the create key rides stdin from the `ide-model-key` credential binding, never argv, never a parameter):
 
 | Parameter | Meaning |
 |---|---|
 | `UID` | Validated `^[0-9]{1,8}$`; job refuses anything else before composing a command (SR1). |
 | `ACTION` | `create` / `start` / `probe` / `stop`. |
 | `IMAGE_TAG` | Pinned tag (C6), e.g. `dev-amd64-<sha>`; never `latest`. |
-| `MODEL_KEY` | `PasswordParameterDefinition`, masked; only `ACTION=create` reads it (FR10). |
 | `REQUEST_ID` | Echoed into markers so the portal can attribute builds. |
+
+The create-stage build additionally binds the Secret text credential `ide-model-key` (Model key flow). The Jenkins user that triggers builds needs `Credentials/Use` on the job's item scope (`Item.Build`/`Read`/`Cancel` alone makes the binding fail with "Credential 'ide-model-key' not found").
 
 Job config: `disableConcurrentBuilds()` plus a quiet period absorbs duplicate triggers; the portal authenticates with a scoped API token for `buildWithParameters` (SR3). The job takes seconds for `probe` and minutes for `create`.
 
@@ -76,10 +78,10 @@ Job config: `disableConcurrentBuilds()` plus a quiet period absorbs duplicate tr
 
 ## Provisioning recipe
 
-`ACTION=create` on the host, values interpolated only after the uid passes SR1 (the env file is the `MODEL_KEY` file from the Model key flow, so the key never enters this command line):
+`ACTION=create` on the host, values interpolated only after the uid passes SR1 (the key arrives on stdin from the `ide-model-key` credential binding, written by `provision.sh` to the env file shown here, so the key never enters this command line):
 
 ```bash
-umask 077; printf 'NR_API_KEY=%s\n' "$MODEL_KEY" > /run/ide-14409.env
+umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /run/ide-14409.env
 docker run -d --name ide-14409 \
   --hostname ide-14409 \
   --network dc_default \
@@ -146,7 +148,6 @@ domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64-<sha>
-modelKey: {envFile: .env, varName: NR_API_KEY}   # read at create only (FR10, SR5)
 jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 # The auth-iam gate reads its own row; jwks_uri comes from its discovery document.
 # Where the server cannot reach the IAM, iam.trustFile names a JSON file

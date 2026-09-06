@@ -1,20 +1,19 @@
 /**
- * Config loading behavior: fail-loud on every malformed value, the `.env`
- * model-key read, and the exact wire values the rest of the portal derives.
+ * Config loading behavior: fail-loud on every malformed value and the exact
+ * wire values the rest of the portal derives.
  */
 
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { loadPortalConfig, parseEnvFile, parsePortalConfig, readModelKey } from '../src/config.ts'
+import { loadPortalConfig, parsePortalConfig } from '../src/config.ts'
 
 const VALID = `
 domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64-abc1234
-modelKey: {envFile: .env, varName: NR_API_KEY}
 jenkins: {url: https://jenkins.test/, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: https://iam.test/idp/, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
@@ -62,30 +61,7 @@ describe('parsePortalConfig', () => {
   })
 })
 
-describe('model key file (FR10)', () => {
-  it('parses KEY=VALUE lines and skips comments and blanks', () => {
-    expect(parseEnvFile('# c\nA=1\n\n B = 2 \n')).toEqual({ A: '1', B: '2' })
-  })
-
-  it('reads the named var from the configured file', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-cfg-'))
-    dirs.push(dir)
-    const envFile = join(dir, '.env')
-    await writeFile(envFile, 'NR_API_KEY=sk-platform\nOTHER=x\n')
-    const config = { ...parsePortalConfig(VALID), modelKey: { envFile, varName: 'NR_API_KEY' } }
-    expect(readModelKey(config)).toBe('sk-platform')
-  })
-
-  it('fails loud when the file or the var is missing', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-cfg-'))
-    dirs.push(dir)
-    const base = parsePortalConfig(VALID)
-    expect(() => readModelKey({ ...base, modelKey: { envFile: join(dir, 'nope.env'), varName: 'NR_API_KEY' } })).toThrow(/unreadable/)
-    const empty = join(dir, 'empty.env')
-    await writeFile(empty, 'X=1\n')
-    expect(() => readModelKey({ ...base, modelKey: { envFile: empty, varName: 'NR_API_KEY' } })).toThrow(/missing/)
-  })
-
+describe('config file (N3)', () => {
   it('loadPortalConfig reads from disk', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ide-portal-cfg-'))
     dirs.push(dir)

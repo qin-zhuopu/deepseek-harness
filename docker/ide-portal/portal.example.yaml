@@ -1,12 +1,12 @@
 # Portal deployment config (0008 Configuration) — mounted at /etc/ide-portal/portal.yaml.
-# Secrets are NOT here: IDE_JENKINS_TOKEN and the model key env file arrive via
-# --env-file at run time; modelKey.envFile points INSIDE the container at the
-# mounted key file, which provisioning copies to a fresh 0600 file per create.
+# Secrets are NOT here: IDE_JENKINS_TOKEN arrives via --env-file at run time.
+# The model key has no place in this config at all: the create-stage Jenkins
+# build binds the Jenkins Secret text credential `ide-model-key` itself
+# (0008 Model key flow, FR10/SR5).
 domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64                       # pin to dev-amd64-<sha> per rollout step (C6)
-modelKey: {envFile: /run/secrets/ide-model.env, varName: NR_API_KEY}
 jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 # Where the server cannot reach the IAM, seed the two published documents once

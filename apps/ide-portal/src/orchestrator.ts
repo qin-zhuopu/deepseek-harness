@@ -10,7 +10,6 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { PortalConfig } from './config.ts'
-import { readModelKey } from './config.ts'
 import type { LiveEvent, StepEvent, StepName, StateEvent } from './events.ts'
 import { freshCursor, parseMarkers, type ConsoleCursor } from './marker.ts'
 import type { JenkinsClient, TriggerParams } from './jenkins.ts'
@@ -157,7 +156,7 @@ export class Orchestrator {
       const current = this.run(uid).snapshot.state
       return current === 'HEALTHY' || current === 'READY' ? { kind: 'healthy' } : { kind: 'exists', running: true }
     }
-    const build = await this.trigger(uid, 'probe', undefined)
+    const build = await this.trigger(uid, 'probe')
     const markers = await this.tailBuild(build)
     const line = markers.find(marker => marker.step === 'reconcile')
     if (line === undefined || line.status === 'fail') throw new Error(`reconcile: probe build #${String(build)} returned no reconcile marker`)
@@ -211,7 +210,7 @@ export class Orchestrator {
     try {
       this.appendStep(uid, 'lock', 'ok', `action=${action}`)
       this.setState(uid, action === 'create' ? 'PROVISIONING' : 'STARTING', { failedStep: undefined })
-      const build = await this.trigger(uid, action, action === 'create' ? readModelKey(this.config) : undefined)
+      const build = await this.trigger(uid, action)
       this.appendStep(uid, 'jenkins-queued', 'ok', `build pending #${String(build)}`)
       const state = await this.drive(uid, build)
       return state
@@ -225,13 +224,12 @@ export class Orchestrator {
   }
 
   /** Trigger the job and persist the marker file (portal-restart attach point, N3). */
-  private async trigger(uid: string, action: TriggerParams['action'], modelKey: string | undefined): Promise<number> {
+  private async trigger(uid: string, action: TriggerParams['action']): Promise<number> {
     const requestId = randomUUID()
     const itemPath = await this.jenkins.trigger({
       uid,
       action,
       imageTag: this.config.imageTag,
-      modelKey,
       requestId,
     })
     let build: number | undefined

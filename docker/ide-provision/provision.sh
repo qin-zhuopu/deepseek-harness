@@ -2,7 +2,9 @@
 # Per-user IDE provisioning on the Docker host (docs/containerization/0008).
 # argv: <uid> <action> <image> <request-id> <domain-suffix>
 # ACTION=create additionally reads the platform model key as one stdin line
-# (never argv, never the console — SR5). Every step prints one
+# (piped by the Jenkins create-stage build from the `ide-model-key` Secret
+# text credential — never argv, never the console, never a build parameter,
+# SR5). Every step prints one
 # `[DSH_STEP] <seq> <step> <ok|fail|info> <detail>` line, which Jenkins
 # forwards to the build console and the portal parses into live events.
 set -euo pipefail

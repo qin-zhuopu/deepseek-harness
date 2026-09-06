@@ -7,7 +7,7 @@
 
 import { createServer } from 'node:http'
 import { once } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateKeyPairSync, createSign } from 'node:crypto'
@@ -48,8 +48,6 @@ afterEach(async () => {
 
 async function start(autoCheck = false): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'ide-portal-srv-'))
-  const envFile = join(dir, '.env')
-  await writeFile(envFile, 'NR_API_KEY=sk-test\n')
 
   const idp = createServer((req, res) => {
     const origin = `http://127.0.0.1:${String((idp.address() as { port: number }).port)}`
@@ -75,7 +73,6 @@ domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64-abc1234
-modelKey: {envFile: ${JSON.stringify(envFile)}, varName: NR_API_KEY}
 jenkins: {url: http://jenkins.invalid, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: ${issuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}

@@ -50,25 +50,27 @@ flowchart LR
 
 ## 模型 key 流转(FR10、SR5)
 
-key 只有一个人工维护的家:Web 项目后端的 `.env`(`NR_API_KEY=...`,与其他机密放在一起,绝不提交)。只有 `ACTION=create` 会搬运它,路径的选择标准是:取值绝不出现在 argv 行、console 行或存留的 shell history 里:
+key 只有一个家:全局凭据库里的 Jenkins Secret text 凭据 `ide-model-key`,由 Jenkins 管理员维护(O3)。Portal 不持有、也不发送任何 key:它只触发 `ACTION=create`。路径的选择标准是:取值绝不出现在 argv 行、console 行、构建参数或存留的 shell history 里:
 
-1. Portal 在触发时刻读取 `.env`,作为掩码构建参数 `MODEL_KEY` 传给 Jenkins。
-2. 任务在宿主机上写出一次性 env 文件——`umask 077; printf 'NR_API_KEY=%s\n' "$MODEL_KEY" > /run/ide-<uid>.env`——以 `docker run --env-file` 交给它,用完立刻删除;取值以文件内容(而不是可见参数)的形式到达 daemon(`docker run -e NR_API_KEY=$KEY` 会把 key 暴露给所有本地用户的 `ps`,以及进程检查)。
-3. 容器把该 env 存进自身配置,`start`/`probe`/`stop` 之后都不再携带 key;Portal 页面、步骤 marker、Jenkins console 从不打印它(掩码参数覆盖 console)。
+1. create 阶段的 build 用 `withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')])` 绑定该凭据,绑定值为空即失败即报。
+2. 绑定作用域内,任务在 workspace 以 `umask 077` 把取值落成文件,再把这个文件通过 ssh 会话的 stdin 管给 `provision.sh`;脚本的 trap 清掉任何残留,Jenkins `post` 块在每条路径上抹掉暂存文件。
+3. 宿主机上 `provision.sh` 写出一次性 env 文件——`umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /run/ide-<uid>.env`——以 `docker run --env-file` 交给它,用完立刻删除;取值以文件内容(而不是可见参数)的形式到达 daemon(`docker run -e NR_API_KEY=$KEY` 会把 key 暴露给所有本地用户的 `ps`)。
+4. 容器把该 env 存进自身配置,`start`/`probe`/`stop` 之后都不再携带 key;Portal 页面、步骤 marker、Jenkins console 从不打印它。
 
-接受的残余风险(SR5):Jenkins 构建记录会持久化构建参数,因此能读 `ide-provision` 构建历史的人就能读到 key——用收紧该任务的读权限来缓解;并且每个用户容器自己的 shell 都能经 `docker exec`/`env` 读到 key,所以这把 key 是舰队级、可吊销、有消费上限的。若参数持久化将来不可接受,替代方案是预先在宿主机放好 600 权限的 env 文件(`docker/deploy-dsh-aio-arm64.sh` 已在用 `~/dsh-aio.env` 这个模式)并去掉 `MODEL_KEY`——任务配方其余部分不变。
+接受的残余风险(SR5):每个用户容器自己的 shell 都能经 `docker exec`/`env` 读到 key,所以这把 key 是舰队级、可吊销、有消费上限的;Jenkins 管理员按定义就能读凭据库。凭据未配置时的 create 在 key 步骤以点名错误失败,不会产出无 key 的容器。
 
 ## Jenkins 执行器
 
-一个参数化 pipeline 任务,由 [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) 定义(与 [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md) 里 `dsh-aio-dev-build` 同为 Pipeline from SCM 模式),所有宿主机操作都在 `sshagent(credentials: ['ssh'])` 里以 `admin` 身份执行;宿主动作全在 [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh),任务每次运行都把它推到宿主 `/opt/ide-provision/`,再用 `ssh ... bash -s` 执行(create 的 key 只走 stdin,不进 argv):
+一个参数化 pipeline 任务,由 [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) 定义(与 [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md) 里 `dsh-aio-dev-build` 同为 Pipeline from SCM 模式),所有宿主机操作都在 `sshagent(credentials: ['ssh'])` 里以 `admin` 身份执行;宿主动作全在 [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh),任务每次运行都把它推到宿主 `/opt/ide-provision/`,再用 `ssh ... bash -s` 执行(create 的 key 从 `ide-model-key` 凭据绑定经 stdin 送达,不进 argv,也不是参数):
 
 | 参数 | 含义 |
 |---|---|
 | `UID` | 校验 `^[0-9]{1,8}$`;任务在拼装任何命令之前先拒绝其它值(SR1)。 |
 | `ACTION` | `create` / `start` / `probe` / `stop`。 |
 | `IMAGE_TAG` | 钉死的 tag(C6),例如 `dev-amd64-<sha>`;绝不用 `latest`。 |
-| `MODEL_KEY` | `PasswordParameterDefinition`,掩码;只有 `ACTION=create` 读取它(FR10)。 |
 | `REQUEST_ID` | 写入 marker,便于 Portal 把 build 归属到本次请求。 |
+
+create 阶段的 build 另绑定 Secret text 凭据 `ide-model-key`(模型 key 流转)。触发 build 的 Jenkins 用户必须在任务 item 作用域上拥有 `Credentials/Use`(只有 `Item.Build`/`Read`/`Cancel` 会让绑定报 "Credential 'ide-model-key' not found")。
 
 任务配置:`disableConcurrentBuilds()` 加静默期吸收重复触发;Portal 用限定作用域的 API token 调用 `buildWithParameters`(SR3)。`probe` 耗时数秒,`create` 耗时数分钟。
 
@@ -76,10 +78,10 @@ key 只有一个人工维护的家:Web 项目后端的 `.env`(`NR_API_KEY=...`,�
 
 ## 开通配方
 
-宿主机上的 `ACTION=create`,其中的值只在 uid 通过 SR1 校验后才参与插值(env 文件即"模型 key 流转"里的 `MODEL_KEY` 文件,key 因此不进入这条命令行):
+宿主机上的 `ACTION=create`,其中的值只在 uid 通过 SR1 校验后才参与插值(key 从 `ide-model-key` 凭据绑定经 stdin 到达,由 `provision.sh` 写成下面这条 env 文件,key 因此不进入这条命令行):
 
 ```bash
-umask 077; printf 'NR_API_KEY=%s\n' "$MODEL_KEY" > /run/ide-14409.env
+umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /run/ide-14409.env
 docker run -d --name ide-14409 \
   --hostname ide-14409 \
   --network dc_default \
@@ -146,7 +148,6 @@ domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64-<sha>
-modelKey: {envFile: .env, varName: NR_API_KEY}   # read at create only (FR10, SR5)
 jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 # The auth-iam gate reads its own row; jwks_uri comes from its discovery document.
 # Where the server cannot reach the IAM, iam.trustFile names a JSON file

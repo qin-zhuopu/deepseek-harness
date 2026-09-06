@@ -8,12 +8,15 @@
 
 import type { JenkinsConfig } from './config.ts'
 
-/** Parameters of one job run; `MODEL_KEY` travels masked and only for create (FR10). */
+/**
+ * Parameters of one job run; the model key is no longer among them — the
+ * create-stage build binds the Jenkins `ide-model-key` credential itself
+ * (FR10, SR5).
+ */
 export interface TriggerParams {
   uid: string
   action: 'create' | 'start' | 'probe' | 'stop'
   imageTag: string
-  modelKey: string | undefined
   requestId: string
 }
 
@@ -52,7 +55,6 @@ export function createJenkinsClient(config: JenkinsConfig, fetchImpl: typeof glo
   return {
     async trigger(params) {
       const form = new URLSearchParams({ UID: params.uid, ACTION: params.action, IMAGE_TAG: params.imageTag, REQUEST_ID: params.requestId })
-      if (params.modelKey !== undefined) form.set('MODEL_KEY', params.modelKey)
       const res = await request(`/job/${config.job}/buildWithParameters`, { method: 'POST', body: form })
       const location = res.headers.get('location')
       if (!res.ok || location === null) throw new Error(`jenkins: trigger ${params.action} for ${params.uid} failed with ${String(res.status)}`)

@@ -64,15 +64,11 @@ async function startIdp(): Promise<{ issuer: string }> {
 
 async function setup(): Promise<{ config: PortalConfig; iam: IamClient }> {
   const { issuer } = await startIdp()
-  const dir = await mkdtemp(join(tmpdir(), 'ide-portal-auth-'))
-  const envFile = join(dir, '.env')
-  await writeFile(envFile, 'NR_API_KEY=sk-test\n')
   const config = parsePortalConfig(`
 domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: t
-modelKey: {envFile: ${JSON.stringify(envFile)}, varName: NR_API_KEY}
 jenkins: {url: http://jenkins.invalid, job: j, user: u, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: ${issuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
@@ -213,15 +209,11 @@ describe('offline trust (iam.trustFile)', () => {
   async function offlineSetup(): Promise<{ config: PortalConfig; iam: IamClient; issuer: string }> {
     const { issuer } = await startIdp()
     const trustFile = await seedTrustFile(issuer, context?.dir ?? '/tmp')
-    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-auth-'))
-    const envFile = join(dir, '.env')
-    await writeFile(envFile, 'NR_API_KEY=sk-test\n')
     const config = parsePortalConfig(`
 domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: t
-modelKey: {envFile: ${JSON.stringify(envFile)}, varName: NR_API_KEY}
 jenkins: {url: http://jenkins.invalid, job: j, user: u, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: ${issuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback, trustFile: ${JSON.stringify(trustFile)}}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}

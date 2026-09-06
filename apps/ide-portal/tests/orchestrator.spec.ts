@@ -5,7 +5,7 @@
  * persistence across a portal restart (N3).
  */
 
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -40,8 +40,6 @@ interface Harness {
 async function harness(clock: Clock = instantClock): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'ide-portal-orch-'))
   dirs.push(dir)
-  const envFile = join(dir, '.env')
-  await writeFile(envFile, 'NR_API_KEY=sk-test\n')
   const stateDir = join(dir, 'state')
   const config: PortalConfig = {
     ...parsePortalConfig(`
@@ -49,7 +47,6 @@ domainSuffix: jereh-pe.cn
 entryHost: ide.jereh-pe.cn
 uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
 imageTag: dev-amd64-abc1234
-modelKey: {envFile: ${JSON.stringify(envFile)}, varName: NR_API_KEY}
 jenkins: {url: https://jenkins.test, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: https://iam.test/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
@@ -83,7 +80,6 @@ describe('cold path (FR4, US1)', () => {
       'image-pull', 'docker-run', 'start-hook', 'probe-internal', 'probe-proxy', 'ready',
     ])
     const create = jenkins.triggered.find(t => t.action === 'create')
-    expect(create?.modelKey).toBe('sk-test')
     expect(create?.imageTag).toBe('dev-amd64-abc1234')
     const states = events.filter(e => e.type === 'state').map(e => e.state)
     expect(states).toContain('PROVISIONING')
@@ -91,13 +87,13 @@ describe('cold path (FR4, US1)', () => {
     expect(orchestrator.stateEvent('14409').ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
   })
 
-  it('the create action carries the model key, start never does (FR10)', async () => {
+  it('a stopped container starts without any key transport (FR10, SR5)', async () => {
     const { orchestrator, jenkins } = await harness()
     jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info stopped\n', result: 'SUCCESS' })
     jenkins.script('start', { console: '[DSH_STEP] 2 start-hook ok fired\n[DSH_STEP] 3 probe-internal ok 200\n[DSH_STEP] 4 probe-proxy ok 200\n[DSH_STEP] 5 ready ok done\n', result: 'SUCCESS' })
     expect(await orchestrator.enter('14409')).toBe('READY')
     const start = jenkins.triggered.find(t => t.action === 'start')
-    expect(start?.modelKey).toBeUndefined()
+    expect(start?.imageTag).toBe('dev-amd64-abc1234')
   })
 })
 

@@ -49,7 +49,7 @@ The token carries **no email and no group claim**. Any entry restriction to a su
 - **FR7 One provisioning per user**: two tabs or devices entering at once must produce exactly one provisioning action; the second viewer subscribes to the same live log.
 - **FR8 Failure reporting**: a failed step stops the flow, names the failed step and its error in the log panel, and offers a retry that resumes from the reconciled state.
 - **FR9 Data survives recreation**: user workspaces live on a named volume; recreating or upgrading a container never destroys user data.
-- **FR10 Model key injection**: the platform LLM key lives in the portal backend's `.env`; the create action carries it to the host and injects it as `NR_API_KEY` into the new container's environment, so the agent can call the LLM from first boot. Restarts and probes never need the key — it is part of the container's stored configuration.
+- **FR10 Model key injection**: the platform LLM key lives in the Jenkins Secret text credential `ide-model-key` in the global credentials store; the create-stage build binds it and injects it as `NR_API_KEY` into the new container's environment, so the agent can call the LLM from first boot. The portal holds and sends no key. Restarts and probes never need it — it is part of the container's stored configuration.
 
 ## User stories
 
@@ -148,7 +148,7 @@ sequenceDiagram
 - **SR2 Reachability**: `ide-<uid>.jereh-pe.cn` is enumerable (uid = employee number) and C4 means plain HTTP. Unauthenticated reach of a user container is remote code execution. The portal must require its session cookie on every route, and the user container's own auth story is Open item O2 with a container-side OIDC gate recommended.
 - **SR3 Execution authority**: only Jenkins holds the host credential; the portal holds a Jenkins trigger token, never the SSH credential.
 - **SR4 Token handling**: the OIDC `id_token` stays server-side at the portal; it is never placed in a URL query or in a provisioned container's environment. Handing it to user containers (the gate's cookie model does exactly that) is decided with O2, not by implementation drift.
-- **SR5 Model key exposure surface**: the injected key is readable by anyone who can `docker exec` into a user container (that is, the container's own user) or `docker inspect` on the host. That is accepted, so the key must be a revocable platform key with spend limits, and it must never travel as a plain console line or a command-line argument visible in the host's process list; the transport rules are in [0008](0008-per-user-ide-design.md) (O3 resolved with them).
+- **SR5 Model key exposure surface**: the injected key is readable by anyone who can `docker exec` into a user container (that is, the container's own user) or `docker inspect` on the host. That is accepted, so the key must be a revocable platform key with spend limits, and it must never travel as a plain console line, a command-line argument visible in the host's process list, or a build parameter (Jenkins persists parameters into build records); the key's home is the Jenkins Secret text credential and the transport rules are in [0008](0008-per-user-ide-design.md) (O3 resolved with them).
 
 ## Non-functional requirements
 
@@ -165,7 +165,7 @@ O4, O5, and O7 are deliberately parked by the requester (2026-09-05): the main f
 |---|---|---|
 | O1 | ~~Which claim carries the uid~~ — resolved: `sub` (= `userId`), see Identity claims. Remaining half: the entry allowlist — parked with the same decision as O4/O5/O7; the first version admits every identity the company SSO admits. | Add the portal-side employee-number list only when a real exclusion is needed. |
 | O2 | Whether the user container itself requires login. | Yes — mount the shipped OIDC gate in the container; silent re-auth via the IAM `usk` session after the redirect. No registration cost: each container composes `redirect_uri=http://ide-<uid>.jereh-pe.cn/auth/callback` and the IAM accepts unregistered callbacks (C10). |
-| O3 | ~~Whose model API key~~ — resolved (requester): one platform key, single home in the portal backend `.env`, injected into every container at create via Jenkins (FR10). Remaining: pick the revocable, spend-capped key value and who holds it (SR5). | Issue a dedicated platform key for this fleet, not a personal one. |
+| O3 | ~~Whose model API key~~ — resolved (requester): one platform key, single home in the Jenkins Secret text credential `ide-model-key`, bound by the create-stage build and injected into every container (FR10). Remaining: confirm the key is revocable and spend-capped (SR5). | Issue a dedicated platform key for this fleet, not a personal one. |
 | O4 | Idle reclamation: threshold, stop-vs-remove, who schedules it. | **Open, parked**: revisit after the main flow runs. Then: stop (keep volume) after N hours of no session activity. |
 | O5 | TLS on `*.jereh-pe.cn` (wildcard cert via DNS-01). | **Open, parked**: revisit after the main flow runs; strongly recommended once the fleet grows. |
 | O6 | Multi-host scaling. | Out of scope; keep the host in portal config so a later host map is additive. |

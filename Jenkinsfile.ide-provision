@@ -7,9 +7,15 @@
 // progress channel, so nothing here may print the model key (SR5).
 //
 // Flow: checkout -> ship docker/ide-provision/provision.sh to the host ->
-// ssh admin@host sh -s, key piped through stdin on create only. The ssh
-// credential `ssh` (user admin) already exists; the portal token never
-// reaches the host and the host key never reaches the portal (SR3).
+// ssh admin@host sh -s, key piped through stdin on create only. The key
+// lives only in the Jenkins Secret text credential `ide-model-key`: the
+// create-stage build binds it, writes it to a workspace file, and pipes
+// that file through stdin; it is never a build parameter, so it lands in
+// no build history, console, or the portal (SR5). The ssh credential `ssh`
+// (user admin) already exists; the portal token never reaches the host and
+// the host key never reaches the portal (SR3). The credential must carry a
+// value before any create can succeed; a create with an unset or placeholder
+// credential fails at the key step.
 // disableConcurrentBuilds keeps host mutations serial, so a burst of
 // portal retries cannot race `docker run`/`docker rm` (FR7 pairs this with
 // the portal's per-uid in-process lock and the script's name-conflict
@@ -21,7 +27,6 @@ pipeline {
     string(name: 'UID', defaultValue: '', description: 'employee number (portal-validated ^[0-9]{1,8}$)')
     string(name: 'ACTION', defaultValue: 'probe', description: 'create | start | probe | stop')
     string(name: 'IMAGE_TAG', defaultValue: 'dev-amd64', description: 'tag of harbor.jereh.cn/base/dsh-aio')
-    password(name: 'MODEL_KEY', defaultValue: '', description: 'platform LLM key; create only, never echoed (FR10, SR5)')
     string(name: 'REQUEST_ID', defaultValue: '', description: 'portal request correlation id')
   }
   environment {
@@ -57,12 +62,21 @@ set -e
 ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$TARGET_HOST" "mkdir -p /opt/ide-provision"
 cat docker/ide-provision/provision.sh | ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" "cat > /opt/ide-provision/provision.sh.new && chmod 755 /opt/ide-provision/provision.sh.new && mv /opt/ide-provision/provision.sh.new /opt/ide-provision/provision.sh"
 '''
-            // The key rides the ssh session's stdin only — never argv, never
-            // this console; the script writes it to a 0600 file on the host
-            // and unlinks it on exit (0008 Model key flow).
+            // The key lives only in the Jenkins Secret text credential
+            // `ide-model-key`; the create-stage build binds it, fails loud on
+            // an unset value, writes it to a workspace file, and pipes that
+            // file through the ssh session's stdin — never argv, never this
+            // console, never a build parameter (0008 Model key flow).
             def image = "harbor.jereh.cn/base/dsh-aio:${imageTag}"
             if (action == 'create') {
-              writeFile file: '.model-key.stdin', text: "${params.MODEL_KEY}\n"
+              withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')]) {
+                sh(label: 'stage credential key', script: '''
+set -e
+if [ "${MODEL_KEY_SECRET:-}" = "" ]; then echo "credential ide-model-key is empty; refusing create (FR10)"; exit 1; fi
+umask 077
+printf '%s\\n' "$MODEL_KEY_SECRET" > .model-key.stdin
+''')
+              }
               sh(label: 'provision on host', script: """
 set -e
 ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash -s /opt/ide-provision/provision.sh' \\

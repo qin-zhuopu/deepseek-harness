@@ -24,7 +24,9 @@ const walk = (dir, depth) => {
       if (typeof name === 'string' && name.startsWith('@deepseek-ai/') && !linked.has(name)) {
         linked.add(name)
         const dest = join(nm, name.slice('@deepseek-ai/'.length))
-        if (!existsSync(dest)) symlinkSync(dirPath, dest)
+        // The target must be absolute: a relative symlink resolves against the
+        // link's own directory (node_modules/@deepseek-ai), not the repo root.
+        if (!existsSync(dest)) symlinkSync(join(root, dirPath), dest)
       }
     }
     walk(dirPath, depth + 1)

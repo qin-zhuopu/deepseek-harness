@@ -38,7 +38,8 @@ Deliberately NOT deployed: `DSH_IAM_GATE=1`. `iam.jereh.cn` is unreachable from 
 
 ## Pending follow-ups
 
-- DONE this session: compose entrypoint is now `sleep infinity` and admin's crontab runs `docker exec dsh-aio /usr/local/bin/supervise.sh` every 2 minutes (the supervise script is idempotent and exits when a supervisor is already running). `docker rm`/recreate re-triggers the PID1-freeze, so any entrypoint re-bake must repeat the 755-mode copy above.
+- DONE: compose entrypoint is `sleep infinity` and admin's crontab runs `docker exec dsh-aio /usr/local/bin/supervise.sh` every 2 minutes (idempotent; exits when a supervisor already runs).
+- DONE (2026-09-06): the entrypoint flag-order fix shipped through Jenkins build 28 of `dsh-aio-dev-build` (tree `19e5c0083e`, PUSH_HARBOR) and `docker-compose up -d` recreated the container on the new image. The verification set passes inside the container and over the https entry, and the CDP browser completes login → Settings → Models provider directory. The `docker cp` + 755 hotfix is retired: the baked entrypoint carries the fix, so `docker rm`/recreate is clean and cron-supervise alone starts the web.
 - Dev-instance plugin churn: `DEV_WATCH=1` (the aio default) rewrites `lib/client.js` under the live carrier, and page loads racing a half-written bundle fail with "Failed to load plugins" on a rotating package name; the demo box now runs `DEV_WATCH=0` (baked bundles).
 - `*.jereh-pe.cn` HTTPS certificate expired 2025-06-23 (jr-nginx-proxy serves it for dsh.jereh-pe.cn); renew or the https entry shows a browser warning.
 - A stray "say hi" session and a stale smoke-job DSL remain on the deployed instance (cosmetic).

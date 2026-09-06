@@ -38,7 +38,8 @@
 
 ## 待办跟进
 
-- 本会话已完成：compose 入口改为 `sleep infinity`，admin 的 crontab 每 2 分钟执行 `docker exec dsh-aio /usr/local/bin/supervise.sh`（supervise 脚本幂等，已有守护进程时直接退出）。`docker rm`/重建会重新触发 PID1 冻结，任何入口重烘焙都要重复上面的 755 拷贝。
+- 已完成：compose 入口为 `sleep infinity`，admin 的 crontab 每 2 分钟执行 `docker exec dsh-aio /usr/local/bin/supervise.sh`（幂等；已有守护进程时立即退出）。
+- 已完成（2026-09-06）：入口 flag 顺序修复经 `dsh-aio-dev-build` build 28（树 `19e5c0083e`，PUSH_HARBOR）出货，`docker-compose up -d` 在新镜像上重建容器。容器内与 https 入口的验证集全通过，CDP 浏览器完成登录 → 设置 → 模型 → 提供方目录。`docker cp` + 755 热修就此退役：烘焙入口已自带修复，`docker rm`/重建是干净的，仅靠 cron-supervise 即可拉起 web。
 - 开发实例的插件抖动：`DEV_WATCH=1`（aio 默认）会在活的 carrier 下重写 `lib/client.js`，撞上写了一半的 bundle 的页面加载会报 "Failed to load plugins"，且每次报错的包名都在轮换；演示机现已设 `DEV_WATCH=0`（烘焙 bundle）。
 - `*.jereh-pe.cn` HTTPS 证书已于 2025-06-23 过期（jr-nginx-proxy 用它服务 dsh.jereh-pe.cn）；不续期浏览器会持续告警。
 - 部署实例上遗留一个 "say hi" 会话与一份过时的 smoke job DSL（观感问题）。

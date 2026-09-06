@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/ops/2026-09-05-dsh-web-login-gate-and-litellm-egress.md
-2026-09-05-dsh-web-login-gate-and-litellm-egress.md: 1edef6a3a44642461184db889ea8fdcfefa0e761
-2026-09-05-dsh-web-login-gate-and-litellm-egress.zh.md: 3c18a4856a958a458ce29ff30d3f13ec2b5a3e1f
+2026-09-05-dsh-web-login-gate-and-litellm-egress.md: 2b4f254fcccc9dac605bd3492b31118fb2a0790e
+2026-09-05-dsh-web-login-gate-and-litellm-egress.zh.md: d0dbfcd2a6708ac36cd6d36ad852778e7c2c5812

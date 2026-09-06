@@ -15,8 +15,8 @@ const retryBtn = document.getElementById('retry')
 const LABELS = {
   PROVISIONING: '正在创建你的 IDE 容器…',
   STARTING: '正在启动容器并通过健康检查…',
-  HEALTHY: '服务已就绪,正在进入…',
-  READY: '服务已就绪!',
+  HEALTHY: '服务已就绪,点击“打开我的 IDE”进入。',
+  READY: '服务已就绪!点击“打开我的 IDE”进入。',
   FAILED: '开通失败,见下方日志。',
   TIMEOUT: '健康检查超时,可重试。',
   IDLE: '服务处于闲置状态,正在唤醒…',
@@ -37,7 +37,7 @@ function renderState(event) {
   statusEl.textContent = checking ? '正在检查服务状态…' : (event.state === 'NO_SERVICE' ? noServiceLabel() : (LABELS[event.state] ?? event.state))
   statusEl.className = 'state ' + event.state.toLowerCase()
   if (event.ideUrl) openBtn.href = event.ideUrl
-  openBtn.hidden = !(event.ideUrl && event.state === 'READY')
+  openBtn.hidden = !(event.ideUrl && (event.state === 'READY' || event.state === 'HEALTHY'))
   checkBtn.hidden = autoCheck || event.state !== 'NO_SERVICE'
   if (event.state !== 'NO_SERVICE') checkBtn.disabled = false
   retryBtn.hidden = !(event.state === 'FAILED' || event.state === 'TIMEOUT')
@@ -60,17 +60,16 @@ function connect() {
     const event = JSON.parse(message.data)
     if (event.type === 'state') renderState(event)
     else renderStep(event)
-    if (event.type === 'state' && (event.state === 'READY' || event.state === 'HEALTHY') && event.ideUrl) {
-      // Auto-navigation with the persistent button as the no-JS fallback (0008 Live log).
-      window.location.assign(event.ideUrl)
-    }
+    // Ready states stop at the status line; only the user's click on the
+    // open button navigates (requester decision, 2026-09-06: no auto jump).
   }
   source.onerror = () => { /* EventSource reconnects on its own; the server replays on (re)connect. */ }
 }
 
 // The one action that reaches Jenkins: the user's own check button (FR3/FR4).
-// A healthy answer lands as READY on the stream (auto-navigation); an absent
-// or stopped service continues into provisioning under the same request.
+// A healthy answer lands as READY on the stream and reveals the open button;
+// an absent or stopped service continues into provisioning under the same
+// request.
 checkBtn.addEventListener('click', async () => {
   checkBtn.disabled = true
   statusEl.textContent = '正在检查服务状态…'
@@ -90,9 +89,8 @@ fetch('/api/state', { credentials: 'same-origin' })
     autoCheck = snapshot.autoCheck === true
     renderState(snapshot.state)
     for (const step of snapshot.steps) renderStep(step)
-    // The portal already observed this service through a health check: finish
-    // the hand-off exactly as the live stream would (FR7 joiner view).
-    if ((snapshot.state.state === 'READY' || snapshot.state.state === 'HEALTHY') && snapshot.state.ideUrl) window.location.assign(snapshot.state.ideUrl)
+    // A READY snapshot renders the status line and the open button; the jump
+    // itself stays with the user's click (requester decision, 2026-09-06).
     // Auto mode keeps the entry flow: the entry reconciled before rendering, so
     // a run the entry did not already start begins here, including reconcile-
     // found stopped containers (FR6); /api/provision joins in-flight runs (FR7).

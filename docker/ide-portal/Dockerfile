@@ -5,9 +5,10 @@
 #
 # Internal/air-gapped shape, same mirrors as docker/dsh/Dockerfile.internal:
 # base from harbor, pnpm through Nexus; nothing reaches registry.npmjs.org.
-# The portal runs from the checked-out sources via Node type stripping, so
-# the image carries the workspace closure of apps/ide-portal only
-# (dsh-host-auth-core, dsh-host-auth-iam, yaml) — never the whole agent build.
+# The portal runs from the checked-out sources via Node type stripping; the
+# `build:lib:host` pass emits the lib/ runtimes its dependencies expose
+# through their main entries (dsh-host-auth-core, dsh-host-auth-iam).
+# The web frontend and client face stay unbuilt.
 
 ARG NODE_IMAGE=harbor.jereh.cn/base/node:24
 ARG NPM_REGISTRY=https://nexus.jereh.cn/repository/npm-public/
@@ -27,7 +28,13 @@ COPY . .
 # not a checkout, and its postinstall fails when the build inherits a
 # core.hooksPath (the Jenkins agent's is /dev/null).
 RUN node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.scripts.postinstall;fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
-RUN pnpm install --no-frozen-lockfile --filter @deepseek-ai/dsh-ide-portal...
+RUN pnpm install --no-frozen-lockfile
+
+# Host-face lib/ artifacts: the portal runs its own sources through Node type
+# stripping, but @deepseek-ai/dsh-host-auth-core resolves through its package
+# main entry, which is built lib/ (gitignored). Same pass the dsh internal
+# image runs, minus the client face and the web frontend.
+RUN pnpm run build:lib:host
 
 # State dir: last-triggered-build marker files (N3); mount a named volume here.
 # Secrets are never baked: the Jenkins API token and the platform model key

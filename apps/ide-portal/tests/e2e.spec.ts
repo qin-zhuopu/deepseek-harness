@@ -165,7 +165,7 @@ async function startStack(opts: StartOptions = {}): Promise<Stack> {
     }
     const queueMatch = /^\/queue\/item\/(\d+)\/(?:api\/json)?$/.exec(url.pathname)
     if (queueMatch !== null) { json(200, executable(Number(queueMatch[1]))); return }
-    const consoleMatch = /^\/job\/ide-provision\/(\d+)\/consoleText$/.exec(url.pathname)
+    const consoleMatch = /^\/job\/ide-provision\/(\d+)\/logText\/progressiveText$/.exec(url.pathname)
     if (consoleMatch !== null) {
       const action = queueItem.get(Number(consoleMatch[1])) ?? 'create'
       const text = (action === 'probe' ? consoles[`probe:${opts.probe ?? 'absent'}`] : consoles[action]) ?? ''
@@ -342,7 +342,7 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(steps.some(step => step.step === 'jenkins-queued' && step.status === 'ok')).toBe(true)
     expect(steps.some(step => step.step === 'image-pull' && step.status === 'ok')).toBe(true)
     expect(stack.jenkinsHits).toContain('POST /job/ide-provision/buildWithParameters')
-    expect(stack.jenkinsHits.some(hit => hit.startsWith('GET /job/ide-provision/') && hit.endsWith('/consoleText'))).toBe(true)
+    expect(stack.jenkinsHits.some(hit => hit.startsWith('GET /job/ide-provision/') && hit.endsWith('/logText/progressiveText'))).toBe(true)
 
     // The SSE stream replays the finished run and lands on READY with the url.
     const sse = await readStream(stack.portalBase, token, '"state":"READY"')

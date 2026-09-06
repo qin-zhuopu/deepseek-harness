@@ -78,7 +78,10 @@ export function createJenkinsClient(config: JenkinsConfig, fetchImpl: typeof glo
       return typeof item.executable?.number === 'number' ? item.executable.number : undefined
     },
     async console(build, start) {
-      const res = await request(`/job/${config.job}/${String(build)}/consoleText?start=${String(start)}`)
+      // progressiveText (not consoleText) is the incremental endpoint: it
+      // honors `start`, answers with the tail only, and reports the absolute
+      // size via x-text-size so a finished build terminates the tail loop.
+      const res = await request(`/job/${config.job}/${String(build)}/logText/progressiveText?start=${String(start)}`)
       if (!res.ok) throw new Error(`jenkins: console read of #${String(build)} failed with ${String(res.status)}`)
       const text = await res.text()
       const size = Number(res.headers.get('x-text-size') ?? String(start + text.length))

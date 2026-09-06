@@ -77,6 +77,7 @@ RUN set -eux; \
         sed -i -e "s|${old}/|${APT_MIRROR}|g" -e "s|${old}|${APT_MIRROR%/}|g" "$f"; \
       done; \
     done; \
+    rm -f /etc/apt/sources.list.d/google-chrome.list; \
     apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \

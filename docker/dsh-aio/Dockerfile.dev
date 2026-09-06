@@ -67,6 +67,7 @@ RUN apt-get update \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
       autocutsel xsel git \
       fonts-noto-cjk fonts-noto-cjk-extra \
+ && rm -f /etc/apt/sources.list.d/google-chrome.list \
  && rm -rf /var/lib/apt/lists/*
 
 # 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。

@@ -37,7 +37,7 @@ function idToken(issuer: string, over: Record<string, unknown> = {}): string {
 }
 
 /** Console scripts per Jenkins action; the create/start sets drive the portal to READY. */
-const consoles: Record<string, string> = {
+const rawConsoles: Record<string, string> = {
   'probe:absent': '[DSH_STEP] 1 reconcile info absent\n',
   'probe:healthy': '[DSH_STEP] 1 reconcile info healthy\n',
   'probe:stopped': '[DSH_STEP] 1 reconcile info stopped\n',
@@ -57,6 +57,15 @@ const consoles: Record<string, string> = {
     '[DSH_STEP] 5 ready ok build SUCCESS',
   ].join('\n') + '\n',
 }
+
+// Live Jenkins (timestamps plugin) prefixes each console line before the
+// script text reaches the console; the fake serves the same shape.
+const stamp = (text: string): string =>
+  text.split('\n').filter(l => l !== '').map(l => `[2026-09-06T08:39:29.081Z] ${l}`).join('\n') + '\n'
+
+const consoles: Record<string, string> = Object.fromEntries(
+  Object.entries(rawConsoles).map(([action, text]) => [action, stamp(text)]),
+)
 
 interface StartOptions {
   autoCheck?: boolean

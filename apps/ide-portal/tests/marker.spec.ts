@@ -23,6 +23,11 @@ describe('parseMarkers', () => {
     expect(markers.map(m => m.step)).toEqual(['lock', 'docker-run'])
   })
 
+  it('parses markers behind the Jenkins timestamp prefix', () => {
+    const [marker] = parseMarkers('[2026-09-06T08:39:29.081Z] [DSH_STEP] 1 reconcile info healthy\n')
+    expect(marker).toEqual({ seq: 1, step: 'reconcile', status: 'info', detail: 'healthy' })
+  })
+
   it('refuses unknown step names and bad statuses', () => {
     expect(parseMarkers('[DSH_STEP] 1 not-a-step ok x')).toEqual([])
     expect(parseMarkers('[DSH_STEP] 1 lock maybe x')).toEqual([])

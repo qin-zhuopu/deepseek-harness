@@ -16,7 +16,10 @@ export interface Marker {
   detail: string
 }
 
-const MARKER = /^\[DSH_STEP\]\s+(\d+)\s+(\S+)\s+(ok|fail|info)\s*(.*)$/
+// Live Jenkins (timestamps plugin) prefixes every console line with
+// `[<ISO instant>] ` before the script's own text, so the marker tag may
+// start anywhere in the line; the bracketed `[DSH_STEP]` itself is the anchor.
+const MARKER = /\[DSH_STEP\]\s+(\d+)\s+(\S+)\s+(ok|fail|info)\s*(.*)$/
 
 /** Parse every marker out of a console chunk; non-marker lines are ignored. Incomplete trailing lines belong to the next chunk's caller. */
 export function parseMarkers(chunk: string): Marker[] {

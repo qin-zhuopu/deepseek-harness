@@ -77,15 +77,18 @@ umask 077
 printf '%s\\n' "$MODEL_KEY_SECRET" > .model-key.stdin
 ''')
               }
+              // The script ships to the host above, so run it by path: stdin
+              // then carries the key alone (with `bash -s` the remote shell
+              // would execute the key as a script line and print it).
               sh(label: 'provision on host', script: """
 set -e
-ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash -s /opt/ide-provision/provision.sh' \\
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash /opt/ide-provision/provision.sh' \\
   '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX' < .model-key.stdin
 """)
             } else {
               sh(label: 'provision on host', script: """
 set -e
-ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash -s /opt/ide-provision/provision.sh' \\
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash /opt/ide-provision/provision.sh' \\
   '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX'
 """)
             }

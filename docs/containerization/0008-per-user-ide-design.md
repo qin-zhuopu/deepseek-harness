@@ -61,7 +61,7 @@ Accepted residual risks (SR5): every user container's own shell can read the key
 
 ## Jenkins executor
 
-One parameterized pipeline job, defined by [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) (same Pipeline-from-SCM pattern as `dsh-aio-dev-build` in [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md)), all host work inside `sshagent(credentials: ['ssh'])` as `admin`; the host actions live in [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh), which the job ships to `/opt/ide-provision/` on every run and executes over `ssh ... bash -s` (the create key rides stdin from the `ide-model-key` credential binding, never argv, never a parameter):
+One parameterized pipeline job, defined by [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) (same Pipeline-from-SCM pattern as `dsh-aio-dev-build` in [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md)), all host work inside `sshagent(credentials: ['ssh'])` as `admin`; the host actions live in [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh), which the job ships to `/opt/ide-provision/` on every run and executes over `ssh ... bash <path>` — by path, not `bash -s`, so the ssh stdin carries the create key from the `ide-model-key` credential binding alone (never argv, never a parameter, and never the script body itself):
 
 | Parameter | Meaning |
 |---|---|

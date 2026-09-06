@@ -23,6 +23,7 @@
 
 - 临时 job `ide-model-key-smoke`(内联 pipeline):SUCCESS,console 只出现 `staged 26 bytes`(25 字符 + 换行)与 `wiped`,无明文;验后已删除该 job。
 - portal 测试 66/66,typecheck 干净;Jenkinsfile 不再有任何 `MODEL_KEY` 参数路径。
+- 第一次真实 `ACTION=create` 暴露了坑:`ssh host 'bash -s /path/script' args < keyfile` 的 key 仍然喂给**远端 shell 的 stdin**,远端把 key 当脚本正文执行——key 那一行以 `sk-…: 未找到命令` 回显进了该次构建 console(该 build 已立即删除)。create 分支现在改为 `ssh host 'bash /opt/ide-provision/provision.sh' args < keyfile`:脚本在上一阶段已推到宿主,按路径执行,stdin 只承载 key。
 
 ## 部署备忘
 

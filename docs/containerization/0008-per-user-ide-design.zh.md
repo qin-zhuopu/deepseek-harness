@@ -61,7 +61,7 @@ key 只有一个家:全局凭据库里的 Jenkins Secret text 凭据 `ide-model-
 
 ## Jenkins 执行器
 
-一个参数化 pipeline 任务,由 [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) 定义(与 [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md) 里 `dsh-aio-dev-build` 同为 Pipeline from SCM 模式),所有宿主机操作都在 `sshagent(credentials: ['ssh'])` 里以 `admin` 身份执行;宿主动作全在 [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh),任务每次运行都把它推到宿主 `/opt/ide-provision/`,再用 `ssh ... bash -s` 执行(create 的 key 从 `ide-model-key` 凭据绑定经 stdin 送达,不进 argv,也不是参数):
+一个参数化 pipeline 任务,由 [`Jenkinsfile.ide-provision`](../../Jenkinsfile.ide-provision) 定义(与 [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md) 里 `dsh-aio-dev-build` 同为 Pipeline from SCM 模式),所有宿主机操作都在 `sshagent(credentials: ['ssh'])` 里以 `admin` 身份执行;宿主动作全在 [`docker/ide-provision/provision.sh`](../../docker/ide-provision/provision.sh),任务每次运行都把它推到宿主 `/opt/ide-provision/`,再用 `ssh ... bash <路径>` 按路径执行——不用 `bash -s`,ssh 的 stdin 因此只承载来自 `ide-model-key` 凭据绑定的 create key(不进 argv,也不是参数,更不能是脚本正文本身):
 
 | 参数 | 含义 |
 |---|---|

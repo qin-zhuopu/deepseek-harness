@@ -23,6 +23,7 @@ The trigger user `portal` had role `ide-provision-runner` (`^ide-provision$`, It
 
 - Temporary job `ide-model-key-smoke` (inline pipeline): SUCCESS, the console shows only `staged 26 bytes` (25 characters + newline) and `wiped`, no secret; the job was deleted after the check.
 - Portal tests 66/66, typecheck clean; the Jenkinsfile has no `MODEL_KEY` parameter path left.
+- First real `ACTION=create` proved the pitfall: `ssh host 'bash -s /path/script' args < keyfile` still feeds the key to the **remote shell's stdin**, which then executes it as script text — the key line echoed back as `sk-…: command not found` and leaked into that build console (build deleted immediately). The create branch now runs `ssh host 'bash /opt/ide-provision/provision.sh' args < keyfile`: the script ships to the host in the stage before, so it runs by path and stdin carries the key only.
 
 ## Deployment notes
 

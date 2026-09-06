@@ -90,6 +90,16 @@ Fixes (`290dedc75f`, `2a3367f7e9`): `INIT_WORKSPACE` defaults to `/workspaces/sy
 - Pipeline DSL updates through the Script Console: base64-encode the whole DSL inside the Groovy script (`new String(java.util.Base64.decoder.decode('…'), 'UTF-8')`); triple-quoted Groovy strings interpolate `$(...)`/`${...}` and corrupt shell steps.
 - The Jenkins job is the executable record: `dsh-aio-dev-build` (parameters BRANCH / TARGET_HOST / PUSH_HARBOR) and `dsh-aio-dev-smoke`; console URLs `https://new-jenkins.jereh.cn/job/<job>/<n>/console`.
 
+## Release of a7c405f3 (same day, second pass)
+
+Bitbucket master was pinned at `955d72f8` while GitHub master carried four more commits (IAM OIDC gate, per-user IDE portal, auth-iam gate, containerization docs). Fast-forward push `955d72f8..a7c405f3` to Bitbucket used credentials decrypted via `jc env get BITBUCKET_USERNAME/BITBUCKET_TOKEN` with `encodeURIComponent` on the token (raw tokens contain `/` and `+`, which break the git URL). The workspace clone was shallow (`git fetch origin --unshallow` was required before ancestry could be evaluated — a shallow clone reports a bogus two-way divergence).
+
+Build #26 (`TARGET_HOST=10.1.17.58`, `PUSH_HARBOR=true`) built `dsh-aio:dev-amd64-a7c405f3` on the host and pushed `base/dsh:dev-amd64`, then was aborted by user `jereh` mid-push of the `base/dsh-aio` manifests (all layers already existed; only the manifest push was cut). Recovery without a rebuild: `docker push` the two tags again on the host (manifest-only, seconds), `docker-compose up -d dsh-aio` against the mutable `dev-amd64` image, exec `/usr/local/bin/supervise.sh` (CentOS7 PID1-freeze workaround), web answered 200 at t=55s. Container image id `cc0c8a79` matches `dev-amd64-a7c405f3`. External checks through the vhost: `/` 200, `/vnc/vnc.html` 200, `POST /api/workspace.list` 200.
+
+`POST /api/credentials.describe` returns 403 "forbidden" through the proxy vhost but 200 over loopback on the same commit — a client-class restriction on the credentials method, not a deployment regression.
+
+Ad-hoc remote operations on 17.58 go through the Jenkins job `dsh-aio-remote-exec` (pipeline from inline definition, `sshagent(['ssh'])`, parameters `TARGET_HOST`/`SCRIPT_B64`); the Script Console runs on the master, which has neither docker nor a key for the host. `jc nginx-proxy service *` needs an `ssh` binary the container does not have. Trigger/track jobs over REST with the API token; the queue item's `executable.number` resolves the build number.
+
 ## Verification data
 
 - jcli v0.0.47 sha256: amd64 `2546eda3…6726d` (7,192,785B), arm64 `a3dea6e2…c79a` (6,649,688B)

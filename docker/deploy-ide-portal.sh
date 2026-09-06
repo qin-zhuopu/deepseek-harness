@@ -11,6 +11,14 @@
 #     admin-owned) — never baked; the key file reaches the portal only as the
 #     read-only mount portal.yaml names, never as a portal process env var;
 #   - /opt/ide-provision/portal.yaml (start from docker/ide-portal/portal.example.yaml);
+#   - when the host cannot reach the IAM, /opt/ide-provision/iam-trust.json
+#     (0600, admin-owned) with the IAM's two published documents captured from a
+#     network that can reach it:
+#       node -e 'const f=async(u)=>JSON.parse(await (await fetch(u)).text());
+#         (async()=>{const d=await f("https://iam.jereh.cn/idp/.well-known/openid-configuration");
+#           process.stdout.write(JSON.stringify({discovery:d,jwks:await f(d.jwks_uri)))})()
+#         ' > /opt/ide-provision/iam-trust.json
+#     and point portal.yaml's iam.trustFile at /etc/ide-portal/iam-trust.json;
 #   - harbor.jereh.cn/base/node:24 pullable (Nexus/harbor mirrors).
 # The container joins dc_default and declares VIRTUAL_HOST, so nginx-proxy
 # serves it like every other vhost (C3/C5: the proxy is never edited).
@@ -21,6 +29,13 @@ SSH_USER="${SSH_USER:-admin}"
 DOMAIN="${IDE_PORTAL_DOMAIN:-ide.jereh-pe.cn}"
 REPO_DIR="/opt/ide-portal-build"
 IMAGE_TAG="ide-portal:$(git -C "$(dirname "$0")/.." rev-parse --short HEAD)"
+
+# Mount the offline trust file only when the operator seeded it; the portal
+# fetches IAM discovery and JWKS live when it is absent.
+TRUST_MOUNT=""
+if [ "${IDE_PORTAL_TRUST:-auto}" != "off" ] && ssh -o StrictHostKeyChecking=no "$SSH_USER@$HOST" "test -f /opt/ide-provision/iam-trust.json"; then
+  TRUST_MOUNT="-v /opt/ide-provision/iam-trust.json:/etc/ide-portal/iam-trust.json:ro"
+fi
 
 ssh -o StrictHostKeyChecking=no "$SSH_USER@$HOST" "mkdir -p $REPO_DIR"
 git -C "$(dirname "$0")/.." ls-files -z |
@@ -40,6 +55,7 @@ docker run -d --name ide-portal \
   --restart unless-stopped \
   -v ide-portal-state:/var/lib/ide-portal \
   -v /opt/ide-provision/portal.yaml:/etc/ide-portal/portal.yaml:ro \
+  $TRUST_MOUNT \
   -v /opt/ide-provision/model-key.env:/run/secrets/ide-model.env:ro \
   --env-file /opt/ide-provision/ide-portal.env \
   -e VIRTUAL_HOST=$DOMAIN -e VIRTUAL_PORT=8080 -e HTTPS_METHOD=noredirect \

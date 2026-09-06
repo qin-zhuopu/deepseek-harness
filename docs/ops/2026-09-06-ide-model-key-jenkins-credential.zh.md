@@ -27,5 +27,7 @@
 
 ## 部署备忘
 
-- 17.58 上 `/opt/ide-provision/model-key.env` 已无引用,可随手删除;`portal.yaml` 删掉 `modelKey:` 行,否则新镜像(严格 schema)启动即报。
+- 17.58 上 `/opt/ide-provision/model-key.env` 已无任何引用(已删除);线上 `portal.yaml` 删掉了 `modelKey:` 行(旁边留有带时间戳的 `.bak`)。
 - Jenkins job 定义(Pipeline script from SCM)自动取 master 的新 Jenkinsfile,无需改 job 配置。
+- `ide-portal-deploy` 的健康门从一开始就写错了:只认 200,而无会话的宿主回环 curl 只会得到 401(无 session)或 302(浏览器 Accept)。job 配置已改为对带 `Accept: text/html` 的入口应答接受 200 或 302,`ide-portal-deploy` #12 已绿色部署无 key 的新 portal 镜像。
+- 端到端 create(build 10):image-pull → docker-run → start-hook → probe-internal(401 = IAM 闸门)→ probe-proxy → ready 全绿,console 无泄漏;容器内 `NR_API_KEY` 与凭据哈希一致(经 ssh 只比哈希,值不落地),`/opt/ide-provision` 事后无 `*.env` 残留。

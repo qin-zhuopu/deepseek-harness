@@ -27,5 +27,7 @@ The trigger user `portal` had role `ide-provision-runner` (`^ide-provision$`, It
 
 ## Deployment notes
 
-- `/opt/ide-provision/model-key.env` on 17.58 has no remaining references and can be deleted; drop the `modelKey:` line from `portal.yaml`, or the new image (strict schema) refuses to start.
+- `/opt/ide-provision/model-key.env` on 17.58 had no remaining references (deleted); the `modelKey:` line was dropped from the live `portal.yaml` (a timestamped `.bak` sits beside it).
 - The job definition (Pipeline script from SCM) picks up the new Jenkinsfile from master; no job-config change is needed.
+- `ide-portal-deploy`'s health gate was wrong from the start and only passed 200 from an unauthenticated host-loopback curl, which the portal answers with 401 (no session) or 302 (browser Accept): the job config now accepts 200 or 302 on the entry with `Accept: text/html`, and `ide-portal-deploy` #12 deployed the key-free portal image green.
+- End-to-end create (build 10): image-pull → docker-run → start-hook → probe-internal (401 = IAM gate) → probe-proxy → ready, all ok, console secret-free; the container's `NR_API_KEY` hash equals the credential's (verified by hash over ssh, value never printed), and `/opt/ide-provision` held no leftover `*.env` afterwards.

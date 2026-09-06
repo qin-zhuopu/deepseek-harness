@@ -37,9 +37,12 @@ RUN pnpm install --no-frozen-lockfile
 RUN pnpm run build:lib:host
 
 # State dir: last-triggered-build marker files (N3); mount a named volume here.
-# Secrets are never baked: the Jenkins API token and the platform model key
-# arrive via --env-file at run time (0008 Model key flow, SR5).
+# Secrets are never baked: the Jenkins API token arrives via --env-file at
+# run time; the model key never reaches the portal (Jenkins credential
+# binding at create, 0008 Model key flow, SR5).
 RUN mkdir -p /var/lib/ide-portal
 EXPOSE 8080
+# /login is always public; the authenticated / 401s without a session, so the
+# probe must not treat sign-in as failure (0008 Rollout).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD ["node", "-e", "fetch('http://127.0.0.1:8080/login').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "--experimental-strip-types", "apps/ide-portal/src/cli.ts", "--config", "/etc/ide-portal/portal.yaml", "--state", "/var/lib/ide-portal"]

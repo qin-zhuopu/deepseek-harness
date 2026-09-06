@@ -55,10 +55,12 @@ COPY . .
 # fetch leaves node_modules/.pnpm marked as done, which makes install skip
 # workspace linking entirely; drop it so install relinks from the warm store.
 RUN rm -rf node_modules && pnpm install --frozen-lockfile
-# Runtime (tsx source dispatch) resolves workspace packages through node_modules
-# links; `install --offline` after fetch was observed to skip them. Fail the
-# build, not the container boot, if a link is missing.
-RUN test -d node_modules/@deepseek-ai/dsh-client-ui-vnc-preview
+# The loader resolves @deepseek-ai plugin packages by name from the loader's
+# own location; pnpm only links what the dependency graph references, so link
+# every workspace package explicitly and prove the gate's imports resolve.
+COPY docker/dsh/link-workspaces.mjs ./
+RUN node docker/dsh/link-workspaces.mjs  && test -d node_modules/@deepseek-ai/dsh-client-ui-vnc-preview  && test -d node_modules/@deepseek-ai/cordis-plugin-hmr
+
 
 # .git now ships in the image (see .dockerignore) so the dev container can
 # git pull/diff. The build still takes the commit as an explicit arg rather

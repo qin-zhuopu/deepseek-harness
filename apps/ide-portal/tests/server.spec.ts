@@ -169,7 +169,7 @@ describe('cold path page (FR4, FR5)', () => {
     h.jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n[DSH_STEP] 3 ready ok done\n', result: 'SUCCESS' })
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
-    expect(await page.text()).toContain('DSH')
+    expect(await page.text()).toContain('IDE 门户')
     const started = await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
     expect(started.status).toBe(202)
     // Provisioning runs detached; poll the authoritative snapshot until it settles.

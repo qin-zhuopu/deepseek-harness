@@ -51,6 +51,16 @@
 
 经 `dsh-aio-remote-exec` Jenkins 任务执行（`TARGET_HOST=10.1.17.58`、`SCRIPT_B64`，form-encoded `buildWithParameters`）：探测脚本收集宿主机事实；执行脚本完成步骤 1–7 及取证；重启脚本验证 stop/start 自愈。脚本为会话本地文件（操作者容器 `/tmp/poc*.sh`）；上文的配方即可持久形态。
 
+## 双任务切换（2026-09-07 同日晚些时候）
+
+整目录布局现在是一条可切换的第二开通路径，portal 零代码改动、零镜像重建：
+
+- `docker/ide-provision/provision-whole-dir.sh` —— 与 `provision.sh` 相同的 argv、marker 协议、stdin 密钥流和探测阶梯；只有 create 分支不同（布局目录、带守卫的一次性 `/root` 镜像播种、trust 文件复制、三个 bind mount、`com.jereh.layout=whole-dir` 标签）。
+- `Jenkinsfile.ide-provision-whole-dir` —— `Jenkinsfile.ide-provision` 的副本，把变体脚本运到 `/opt/ide-provision/provision-whole-dir.sh`。
+- Jenkins 任务 `ide-provision-whole-dir` —— 克隆 `ide-provision` 的 config.xml，锚定 BitBucket 分支 `ops/ide-provision-whole-dir`（scriptPath `Jenkinsfile.ide-provision-whole-dir`）。用运维凭据经 `POST /createItem?name=…` 创建；build #1 对工号 14410 端到端探测（`reconcile healthy`）。
+
+**portal 切换只改一个 `portal.yaml` 键。** `jenkins.job` 本来就是 fail-loud 的配置项（`apps/ide-portal/src/config.ts`）；portal 只是 Jenkins API 客户端，宿主机上切换布局的操作是：编辑 `/opt/ide-provision/portal.yaml`（`jenkins.job: ide-provision-whole-dir`），然后 `docker restart ide-portal`。两个任务参数完全一致，`probe`/`start` 与布局无关，存量用户不受影响；只有新创建的容器落到整目录布局。切回 = 把键改回去。生产 `portal.yaml` 在需求方点头前仍指向 `ide-provision`；切换前先合分支，因为任务从 SCM 构建。
+
 ## 当前状态
 
-`ide-14410` 以整目录布局运行中，健康（401 = 门禁在保护），数据位于 `/data/ide/14410/`。`ide-14409` 与生产 portal 未受影响。待需求方评审后再动 `provision.sh`、`docs/containerization/0008` 或 portal。
+`ide-14410` 以整目录布局运行中，健康（401 = 门禁在保护），数据位于 `/data/ide/14410/`。`ide-14409` 与生产 portal 未受影响。Jenkins 任务 `ide-provision-whole-dir` 已创建并验证；portal 仍指向 `ide-provision`。待需求方评审后再动 `provision.sh`、`docs/containerization/0008` 或 portal 配置。

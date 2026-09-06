@@ -51,6 +51,16 @@ This is a proof of concept only: `provision.sh`, `docs/containerization/0008`, a
 
 Executed via the `dsh-aio-remote-exec` Jenkins job (`TARGET_HOST=10.1.17.58`, `SCRIPT_B64`, form-encoded `buildWithParameters`): probe script gathered host facts; run script performed steps 1–7 plus evidence capture; restart script verified stop/start self-healing. The scripts are session-local (`/tmp/poc*.sh` in the operator container); the recipe above is the durable form.
 
+## Two-job switch (2026-09-07, later the same session)
+
+The whole layout is now a switchable second provisioning path, with zero portal code changes and zero portal image rebuild:
+
+- `docker/ide-provision/provision-whole-dir.sh` — same argv, marker protocol, stdin key flow, and probe ladder as `provision.sh`; only the create branch differs (layout dirs, guarded one-time `/root` seed from the image, trust-file copy, the three bind mounts, a `com.jereh.layout=whole-dir` label).
+- `Jenkinsfile.ide-provision-whole-dir` — copy of `Jenkinsfile.ide-provision` shipping the variant script to `/opt/ide-provision/provision-whole-dir.sh`.
+- Jenkins job `ide-provision-whole-dir` — clone of `ide-provision`'s config.xml pinned to BitBucket branch `ops/ide-provision-whole-dir` (scriptPath `Jenkinsfile.ide-provision-whole-dir`). Created via `POST /createItem?name=…` with the ops credentials; build #1 probed uid 14410 end-to-end (`reconcile healthy`).
+
+**Portal switch = one `portal.yaml` key.** `jenkins.job` is already a fail-loud config field (`apps/ide-portal/src/config.ts`); the portal is only a Jenkins API client, so switching layouts on the host is: edit `/opt/ide-provision/portal.yaml` (`jenkins.job: ide-provision-whole-dir`), then `docker restart ide-portal`. Both jobs take identical parameters, and `probe`/`start` are layout-agnostic, so existing users are unaffected; only newly created containers land on the whole-dir layout. Switch back = restore the key. The production `portal.yaml` was left on `ide-provision` pending the requester's go-ahead; merge the branch before switching, since the job builds from SCM.
+
 ## Current state
 
-`ide-14410` is running on the whole-directory layout, healthy (401 = gate protecting), data at `/data/ide/14410/`. `ide-14409` and the production portal are untouched. Awaiting the requester's requirements decision before touching `provision.sh`, `docs/containerization/0008`, or the portal.
+`ide-14410` is running on the whole-directory layout, healthy (401 = gate protecting), data at `/data/ide/14410/`. `ide-14409` and the production portal are untouched. Jenkins job `ide-provision-whole-dir` exists and is verified; the portal still points at `ide-provision`. Awaiting the requester's requirements decision before touching `provision.sh`, `docs/containerization/0008`, or the portal config.

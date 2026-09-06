@@ -257,18 +257,13 @@ export class Orchestrator {
   }
 
   /**
-   * 启动我的IDE (requester decision, 2026-09-06): converge to a running IDE
-   * in ONE idempotent build — no preceding probe build. The create action on
-   * the host is idempotent (absent → create, exists → start-and-probe), so
-   * deploy-if-needed, start-if-needed, and retry converge here; an IDE the
-   * latest check found running logs 无需启动 instead of a build.
+   * 启动我的IDE (requester decision, revised 2026-09-06): ALWAYS exactly one
+   * build — the portal holds no host truth, so the create action converges
+   * host-side (absent → create; stopped → start; running+answering → the
+   * start is skipped and the probes confirm) and every case ends ready.
+   * Idempotence lives in provision.sh, never in cached portal state.
    */
   async start(uid: string): Promise<ServiceState> {
-    const state = this.run(uid).snapshot.state
-    if (state === 'HEALTHY' || state === 'READY') {
-      this.appendStep(uid, '提示', 'info', 'IDE 已在运行,无需启动。')
-      return state
-    }
     return await this.provision(uid, 'create')
   }
 
@@ -367,6 +362,7 @@ export class Orchestrator {
           ? { step: '部署', status: 'ok', detail: 'IDE 容器创建完成' }
           : { step: '部署', status: marker.status, detail: marker.detail }
       case 'start-hook':
+        if (marker.detail.includes('skipping start')) return { step: '启动服务', status: 'info', detail: 'IDE 已在运行,无需启动' }
         return marker.status === 'ok'
           ? { step: '启动服务', status: 'ok', detail: '服务已启动' }
           : { step: '启动服务', status: 'info', detail: '首次无响应,正在重试启动…' }

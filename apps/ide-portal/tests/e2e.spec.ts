@@ -296,19 +296,6 @@ async function pollState(base: string, token: string, until: string, tries = 400
   throw new Error(`state never reached ${until}; last: ${JSON.stringify(last)}${jk}${err}`)
 }
 
-/** Poll /api/state until a step with the given name lands (detached writes settle). */
-async function pollSteps(base: string, token: string, step: string, stack?: Stack): Promise<Record<string, unknown>> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    const res = await fetch(`${base}/api/state`, { headers: { cookie: `dsh_token=${token}` } })
-    const last = JSON.parse(await res.text()) as Record<string, unknown>
-    const steps = (last['steps'] ?? []) as { step: string }[]
-    if (steps.some(entry => entry.step === step)) return last
-    await new Promise<void>((resolve) => { setTimeout(resolve, 25) })
-  }
-  const jk = stack === undefined ? '' : `; jenkins: ${JSON.stringify(stack.jenkinsHits.slice(0, 40))}`
-  throw new Error(`step ${step} never landed${jk}`)
-}
-
 /** Read the SSE stream until a JSON fragment appears (or the budget runs out). */
 async function readStream(base: string, token: string, marker: string, ms = 8000): Promise<string> {
   const controller = new AbortController()
@@ -394,19 +381,18 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(steps.some(step => step.step === '就绪')).toBe(true)
   }, 30_000)
 
-  it('starting an already-running IDE builds nothing: the hint lands in the log', async () => {
+  it('starting an already-running IDE still converges in one create build (host-side idempotence)', async () => {
     stack = await startStack({ probe: 'healthy' })
     const token = await signIn(stack)
-    // Arrival check establishes HEALTHY first.
+    // Arrival check establishes HEALTHY first; the 启动 click still builds.
     const page = await fetch(`${stack.portalBase}/`, { headers: { cookie: `dsh_token=${token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
     await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
-    const before = stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters').length
     const accepted = await fetch(`${stack.portalBase}/api/provision`, { method: 'POST', headers: { cookie: `dsh_token=${token}` } })
     expect(accepted.status).toBe(202)
-    const final = await pollSteps(stack.portalBase, token, '提示', stack)
+    const final = await pollState(stack.portalBase, token, 'READY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
-    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(before)
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(2)
   }, 30_000)
 
   it('the entry auto-checks on arrival: a healthy container renders the page on HEALTHY without provisioning', async () => {

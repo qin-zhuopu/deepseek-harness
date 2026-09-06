@@ -177,18 +177,23 @@ const COLD = `[DSH_STEP] 1 image-pull ok pulled dev-amd64-abc1234
 `
 
 describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
-  it('starting an already-running IDE builds nothing and logs a hint step', async () => {
+  it('starting an already-running IDE still converges through one create build (host-side idempotence)', async () => {
     const h = await start()
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    h.jenkins.script('create', {
+      console: '[DSH_STEP] 1 start-hook info already running and answering; skipping start\n[DSH_STEP] 2 probe-internal ok HTTP 200 (already running)\n[DSH_STEP] 3 probe-proxy ok HTTP 200\n[DSH_STEP] 4 ready ok done\n',
+      result: 'SUCCESS',
+    })
     const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
     expect(page.status).toBe(200)
     const arrived = await pollChecked(h)
     expect(arrived.state.state).toBe('HEALTHY')
-    const before = h.jenkins.triggered.length
     const started = await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
     expect(started.status).toBe(202)
-    await pollHint(h)
-    expect(h.jenkins.triggered.length).toBe(before)
+    const final = await pollState(h)
+    expect(final.state.state).toBe('READY')
+    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe', 'create'])
+    expect(final.steps.some(step => step.step === '启动服务' && ('detail' in step) && String(step['detail']).includes('已在运行,无需启动'))).toBe(true)
   })
 
   it('starting from an absent container converges in ONE create build, business steps only', async () => {
@@ -237,17 +242,6 @@ describe('cold path page (FR4, FR5)', () => {
 interface StateSnapshot {
   state: { state: string; checking: boolean; ideUrl: string | undefined }
   steps: { step: string }[]
-}
-
-/** Poll /api/state until a 提示 step shows up (the no-op 启动 hint lands detached). */
-async function pollHint(h: Harness, tries = 200): Promise<void> {
-  for (let attempt = 0; attempt < tries; attempt++) {
-    const response = await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })
-    const snapshot = await response.json() as StateSnapshot
-    if (snapshot.steps.some(step => step.step === '提示')) return
-    await new Promise<void>((resolve) => { setTimeout(resolve, 5) })
-  }
-  throw new Error('no-op hint never landed')
 }
 
 /** Poll /api/state until the arrival check settles (checking=false with a rendered chain). */

@@ -12,6 +12,8 @@ The portal's 启动我的IDE action never triggers the read-only probe build. It
 
 Run steps render in business language (`开始启动/准备运行环境/部署/启动服务/启动后自检/外部访问检查/就绪/启动失败`); the state machine keeps consuming the raw marker names underneath, so `STEP_STATE` and failure attribution (`snapshot.failedStep`) are unchanged. Check chains keep their own labels (`工号/域名/检查/服务状态/Compose 位置/健康检查/结论`).
 
+The portal-side short-circuit for a cached-HEALTHY IDE (no build, a 提示 step) was reversed the same day — see feature/2026-09-06-ide-portal-start-always-builds-host-side-idempotent.md; every 启动 now builds and the host decides.
+
 ## Given up
 
 The old pre-flight `reconcile` before provisioning (and with it the `enter`/`retry` methods): 启动 now acts on possibly stale state. That is safe because host-side idempotence makes any action on any state converge to running; the price is that a stale-`NO_SERVICE` start repeats work the probe would have skipped (harmless: create-on-existing degrades to start). `retry` is subsumed: clicking 启动 again re-runs the same idempotent convergence.

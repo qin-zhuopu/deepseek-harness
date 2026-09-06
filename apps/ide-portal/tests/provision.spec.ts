@@ -196,14 +196,41 @@ describe('create (FR4, FR10, SR5)', () => {
   })
 })
 
+describe('host-side idempotence (requester, 2026-09-06)', () => {
+  it('create on a running, answering container skips the start entirely', async () => {
+    await seed({ container: 'running', image: true, http: '200' })
+    const run = await runScript(dir, 'sk-secret\n', ['14409', 'create', 'harbor.jereh.cn/base/dsh-aio:dev-amd64', 'req-7', 'jereh-pe.cn'])
+    expect(run.code).toBe(0)
+    // No redeploy (the existing container is named, not recreated) and no
+    // hook fire: the run is name-check, confirm, ready.
+    expect(steps(run.stdout)).toEqual([
+      'docker-run info ide-14409 already exists (running); continuing as start',
+      'start-hook info already running and answering; skipping start',
+      'probe-internal ok HTTP 200 (already running)',
+      'probe-proxy ok HTTP 200 after 1 tries, 0s',
+      'ready ok request req-7',
+    ])
+  })
+
+  it('start on a running, answering container likewise skips the hook fire', async () => {
+    await seed({ container: 'running', image: true, http: '200' })
+    const run = await runScript(dir, '', ['14409', 'start', 'harbor.jereh.cn/base/dsh-aio:dev-amd64', 'req-8', 'jereh-pe.cn'])
+    expect(run.code).toBe(0)
+    expect(steps(run.stdout).some(line => line.startsWith('start-hook info already running'))).toBe(true)
+    expect(steps(run.stdout).at(-1)?.startsWith('ready ok')).toBe(true)
+  })
+})
+
 describe('start (FR6 recovery) and stop', () => {
   it('starts an exited container and accepts the gated answer as healthy', async () => {
     await seed({ container: 'exited', image: true, http: '401' })
     const run = await runScript(dir, '', ['14409', 'start', 'img:tag', 'req-9', 'jereh-pe.cn'])
     expect(run.code).toBe(0)
+    // The started container answers immediately, so the hook is skipped:
+    // an answering service is never re-fired (host-side idempotence).
     expect(steps(run.stdout)).toEqual([
-      'start-hook ok fired /usr/local/bin/entrypoint.sh into ide-14409',
-      'probe-internal ok HTTP 401 after 1 tries, 0s',
+      'start-hook info already running and answering; skipping start',
+      'probe-internal ok HTTP 401 (already running)',
       'probe-proxy ok HTTP 401 after 1 tries, 0s',
       'ready ok request req-9',
     ])

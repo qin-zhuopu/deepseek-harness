@@ -167,14 +167,19 @@ describe('failure terminals (FR8, FR6)', () => {
     expect(await orchestrator.start('14409')).toBe('TIMEOUT')
   })
 
-  it('starting an already-running IDE is a no-op: no build, a hint in the log', async () => {
+  it('starting an already-running IDE still builds once; the host skips the start and confirms', async () => {
     const { orchestrator, jenkins } = await harness()
     jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     await orchestrator.reconcile('14409')
-    const builds = jenkins.triggered.length
-    expect(await orchestrator.start('14409')).toBe('HEALTHY')
-    expect(jenkins.triggered.length).toBe(builds)
-    expect(orchestrator.run('14409').steps.at(-1)?.step).toBe('提示')
+    jenkins.script('create', {
+      console: '[DSH_STEP] 1 start-hook info already running and answering; skipping start\n[DSH_STEP] 2 probe-internal ok HTTP 200 (already running)\n[DSH_STEP] 3 probe-proxy ok HTTP 200\n[DSH_STEP] 4 ready ok done\n',
+      result: 'SUCCESS',
+    })
+    expect(await orchestrator.start('14409')).toBe('READY')
+    // The portal holds no host truth: 启动 always converges through a build.
+    expect(jenkins.triggered.map(t => t.action)).toEqual(['probe', 'create'])
+    const skipped = orchestrator.run('14409').steps.find(s => s.detail.includes('已在运行,无需启动'))
+    expect(skipped?.step).toBe('启动服务')
   })
 })
 

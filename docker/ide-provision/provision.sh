@@ -120,21 +120,29 @@ fire_hook() {
 # container, streaming step events (0008: internal proves the hook ran,
 # proxy proves docker-gen installed the vhost).
 start_and_probe() {
-  fire_hook
-  mark start-hook ok "fired ${ENTRY_HOOK} into ${CONTAINER}"
   local budget=$((PROBE_TIMEOUT / PROBE_INTERVAL)) refired=0
-  while ! probe "$budget" probe_internal_once; do
-    # C2's freeze signature: PID1 alive, front never answers. Re-fire the
-    # hook exactly once at the first failure, then keep probing.
-    if [ "$refired" -eq 0 ]; then
-      refired=1
-      mark start-hook info "no answer after ${ELAPSED}s, re-firing hook once"
-      fire_hook
-    else
-      die probe-internal "no health answer within ${PROBE_TIMEOUT}s (PID1 freeze? front-proxy down?)"
-    fi
-  done
-  mark probe-internal ok "HTTP ${CODE} after ${TRIES} tries, ${ELAPSED}s"
+  # Host-side idempotence (requester, 2026-09-06): a container already
+  # running and answering is never re-fired — the probes confirm it and the
+  # run ends ready.
+  if [ "$(container_status)" = running ] && probe_internal_once; then
+    mark start-hook info "already running and answering; skipping start"
+    mark probe-internal ok "HTTP ${CODE} (already running)"
+  else
+    fire_hook
+    mark start-hook ok "fired ${ENTRY_HOOK} into ${CONTAINER}"
+    while ! probe "$budget" probe_internal_once; do
+      # C2's freeze signature: PID1 alive, front never answers. Re-fire the
+      # hook exactly once at the first failure, then keep probing.
+      if [ "$refired" -eq 0 ]; then
+        refired=1
+        mark start-hook info "no answer after ${ELAPSED}s, re-firing hook once"
+        fire_hook
+      else
+        die probe-internal "no health answer within ${PROBE_TIMEOUT}s (PID1 freeze? front-proxy down?)"
+      fi
+    done
+    mark probe-internal ok "HTTP ${CODE} after ${TRIES} tries, ${ELAPSED}s"
+  fi
   if ! probe 6 http_answered -H "Host: ${VHOST}" http://127.0.0.1/; then
     die probe-proxy "no health answer through jr-nginx-proxy (last ${CODE}) after ${ELAPSED}s (docker-gen lag or wrong VIRTUAL_HOST)"
   fi

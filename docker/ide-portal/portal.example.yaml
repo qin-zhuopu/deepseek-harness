@@ -15,10 +15,6 @@ iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPa
 # jwks: <GET jwks_uri>} as raw JSON. Re-capture it after an IAM key rotation.
 # iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback, trustFile: /etc/ide-portal/iam-trust.json}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
-# Entry mode (0007 FR4): false = the start page waits for the user's check
-# button; true = the entry reconciles on arrival and the cold page auto-starts.
-# The shipped deployment runs false; flipping this value switches modes.
-autoCheck: false
 # The proxy reaches the container over dc_default (0005), so bind all interfaces;
 # the loopback-only rule belongs to dsh web, not to this plain service.
 bindHost: 0.0.0.0

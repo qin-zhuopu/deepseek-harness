@@ -135,18 +135,15 @@ export function createPortalServer(
     }
 
     if (path === '/' && req.method === 'GET') {
-      // autoCheck: true reconciles on arrival — a healthy container answers
-      // the entry with the bare 302 (FR3) and the cold page starts its own
-      // run. autoCheck: false renders the shell; nothing probes Docker
-      // or provisions until the check button POSTs /api/provision (FR4).
-      if (config.autoCheck) {
-        const reconcile = await orchestrator.reconcile(uid)
-        if (reconcile.kind === 'healthy') {
-          res.writeHead(302, { location: orchestrator.stateEvent(uid).ideUrl ?? '/' })
-          res.end()
-          return
-        }
-      }
+      // The entry always auto-checks (requester decision, 2026-09-06: read-only
+      // operations run without a click): the reconcile probe reads Docker state
+      // and changes nothing. A healthy answer stays on the page — the status
+      // line and the open button render, and the jump stays with the user's
+      // click. A failed probe (Jenkins unreachable) still renders the page; the
+      // button-driven run reports the error in the log.
+      try {
+        await orchestrator.reconcile(uid)
+      } catch { /* page renders the last known state */ }
       serveStatic('/', res)
       return
     }
@@ -158,9 +155,7 @@ export function createPortalServer(
 
     if (path === '/api/state' && req.method === 'GET') {
       const run = orchestrator.run(uid)
-      // autoCheck tells the page whether the entry already reconciled and may
-      // auto-start (true) or the check button owns the first probe (false).
-      json(res, 200, { state: orchestrator.stateEvent(uid), steps: run.steps, autoCheck: config.autoCheck })
+      json(res, 200, { state: orchestrator.stateEvent(uid), steps: run.steps })
       return
     }
 

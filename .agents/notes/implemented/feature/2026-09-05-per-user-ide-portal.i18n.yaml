@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-05-per-user-ide-portal.md
-2026-09-05-per-user-ide-portal.md: 9c357f7ffd5119da124d024523463ccc7a2a854f
-2026-09-05-per-user-ide-portal.zh.md: 67e35f496e714127563ee6a02113680fef1ec0a5
+2026-09-05-per-user-ide-portal.md: 88d7d36d9175a603f4da0d4cbca5c50bd95f8edb
+2026-09-05-per-user-ide-portal.zh.md: 250b63b34b88aa1cbebd3dea05320e945046973c

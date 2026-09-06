@@ -5,7 +5,7 @@
  * fake Jenkins answering the same REST routes the live client calls. The suite
  * drives the implicit sign-in round-trip, the check-button flow (probe →
  * create/start → READY) with its marker steps and SSE stream, the healthy
- * short-circuit, the autoCheck 302, and the offline trust file boot — over
+ * short-circuit, the always-on read-only entry check, and the offline trust file boot — over
  * loopback HTTP, with no test seams inside the portal and no user credential
  * anywhere.
  */
@@ -68,7 +68,6 @@ const consoles: Record<string, string> = Object.fromEntries(
 )
 
 interface StartOptions {
-  autoCheck?: boolean
   /** Issuer the portal config names; defaults to the fake IAM's live issuer. */
   iamIssuer?: string
   /** Offline trust file to seed instead of reaching the fake IAM. */
@@ -206,7 +205,6 @@ async function startStack(opts: StartOptions = {}): Promise<Stack> {
     `jenkins: {url: http://127.0.0.1:${String((jenkinsServer.address() as { port: number }).port)}, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}`,
     `iam: {issuer: ${iamIssuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback${iamExtra}}`,
     'health: {intervalSec: 30, timeoutSec: 600, pollMs: 10}',
-    `autoCheck: ${String(opts.autoCheck ?? false)}`,
     'bindHost: 127.0.0.1',
     `port: ${String(port)}`,
     '',
@@ -330,7 +328,7 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(authorize.searchParams.get('redirect_uri')).toBe(`${stack.portalBase}/auth/callback`)
 
     const token = await signIn(stack)
-    expect((await pollState(stack.portalBase, token, 'NO_SERVICE', 400, stack))['autoCheck']).toBe(false)
+    await pollState(stack.portalBase, token, 'NO_SERVICE', 400, stack)
 
     const home = await fetch(`${stack.portalBase}/`, { headers: { cookie: `dsh_token=${token}`, accept: 'text/html' } })
     expect(home.status).toBe(200)
@@ -380,12 +378,14 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
   }, 30_000)
 
-  it('autoCheck reconciles on arrival and answers a healthy container with the bare 302 to the IDE url', async () => {
-    stack = await startStack({ autoCheck: true, probe: 'healthy' })
+  it('the entry auto-checks on arrival: a healthy container renders the page on HEALTHY without provisioning', async () => {
+    stack = await startStack({ probe: 'healthy' })
     const token = await signIn(stack)
     const entry = await fetch(`${stack.portalBase}/`, { redirect: 'manual', headers: { cookie: `dsh_token=${token}`, accept: 'text/html' } })
-    expect(entry.status).toBe(302)
-    expect(entry.headers.get('location')).toBe('http://ide-14409.jereh-pe.cn/')
+    expect(entry.status).toBe(200)
+    const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
+    expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
   }, 30_000)
 
   it('attaches to the marker-named build after a portal restart and drives it to READY', async () => {
@@ -433,7 +433,7 @@ describe('portal end-to-end (real process, real sockets)', () => {
       'uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}', 'imageTag: t',
       'jenkins: {url: http://jenkins.invalid, job: j, user: u, tokenEnv: IDE_JENKINS_TOKEN}',
       `iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback, trustFile: ${JSON.stringify(trustFile)}}`,
-      'health: {intervalSec: 30, timeoutSec: 600, pollMs: 10}', 'autoCheck: false',
+      'health: {intervalSec: 30, timeoutSec: 600, pollMs: 10}',
       'bindHost: 127.0.0.1', `port: ${String(port)}`, '',
     ].join('\n'))
     const child: ChildProcess = spawn(process.execPath, ['--experimental-strip-types', cliPath, '--config', configPath], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] })

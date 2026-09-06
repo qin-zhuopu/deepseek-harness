@@ -1,9 +1,9 @@
 /* The start page is a projection of the server state (0007: 服务端状态权威):
    it renders exactly what /api/state + /api/events carry and holds no
-   business logic of its own. The entry mode is a deployment choice carried by
-   /api/state: with autoCheck the entry already reconciled and the page
-   auto-starts a cold run; without it nothing reaches Jenkins until the user
-   presses the check button (0007 FR3/FR4). */
+   business logic of its own. The entry auto-checks on arrival (a read-only
+   reconcile); provisioning is the user's click on the check button, and the
+   jump to the IDE is the user's click on the open button (requester
+   decision, 2026-09-06). */
 'use strict'
 
 const statusEl = document.getElementById('status')
@@ -24,21 +24,14 @@ const LABELS = {
 }
 
 let seenSeq = 0
-// The entry mode from the /api/state snapshot; auto until stated otherwise,
-// so the check button never flashes in an autoCheck deployment.
-let autoCheck = true
-
-function noServiceLabel() {
-  return autoCheck ? '正在检查服务状态…' : '尚未检查服务状态,点击按钮开始。'
-}
 
 function renderState(event) {
   const checking = checkBtn.disabled && event.state === 'NO_SERVICE'
-  statusEl.textContent = checking ? '正在检查服务状态…' : (event.state === 'NO_SERVICE' ? noServiceLabel() : (LABELS[event.state] ?? event.state))
+  statusEl.textContent = checking ? '正在检查服务状态…' : (event.state === 'NO_SERVICE' ? '未发现运行中的 IDE,点击“检查并开通”创建。' : (LABELS[event.state] ?? event.state))
   statusEl.className = 'state ' + event.state.toLowerCase()
   if (event.ideUrl) openBtn.href = event.ideUrl
   openBtn.hidden = !(event.ideUrl && (event.state === 'READY' || event.state === 'HEALTHY'))
-  checkBtn.hidden = autoCheck || event.state !== 'NO_SERVICE'
+  checkBtn.hidden = event.state !== 'NO_SERVICE'
   if (event.state !== 'NO_SERVICE') checkBtn.disabled = false
   retryBtn.hidden = !(event.state === 'FAILED' || event.state === 'TIMEOUT')
 }
@@ -82,21 +75,14 @@ retryBtn.addEventListener('click', async () => {
   retryBtn.disabled = false
 })
 
-// Bootstrap from the authoritative snapshot, then stream (FR5, FR7 joiner view).
+// Bootstrap from the authoritative snapshot (the entry already auto-checked:
+// the state here is fresh and read-only), then stream (FR5, FR7 joiner view).
+// Provisioning never starts on its own — the check button owns that click.
 fetch('/api/state', { credentials: 'same-origin' })
   .then(async (response) => {
     const snapshot = await response.json()
-    autoCheck = snapshot.autoCheck === true
     renderState(snapshot.state)
     for (const step of snapshot.steps) renderStep(step)
-    // A READY snapshot renders the status line and the open button; the jump
-    // itself stays with the user's click (requester decision, 2026-09-06).
-    // Auto mode keeps the entry flow: the entry reconciled before rendering, so
-    // a run the entry did not already start begins here, including reconcile-
-    // found stopped containers (FR6); /api/provision joins in-flight runs (FR7).
-    // Manual mode waits for the check button and starts nothing here.
-    const driven = snapshot.steps.some(step => step.step !== 'reconcile')
-    if (autoCheck && !driven && ['NO_SERVICE', 'STARTING', 'IDLE', 'UNHEALTHY'].includes(snapshot.state.state)) void fetch('/api/provision', { method: 'POST', credentials: 'same-origin' })
   })
   .catch(() => { statusEl.textContent = '无法读取状态,请刷新页面。' })
 connect()

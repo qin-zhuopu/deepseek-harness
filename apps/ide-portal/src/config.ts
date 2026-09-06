@@ -63,14 +63,6 @@ export interface PortalConfig {
   jenkins: JenkinsConfig
   iam: IamConfig
   health: HealthConfig
-  /**
-   * Entry behavior (0007 FR3/FR4). `false` (the shipped first version) renders
-   * the start page and waits for the user's check-button click: no Jenkins
-   * build and no Docker read until the click. `true` reconciles on arrival —
-   * a healthy container answers the entry with a `302`, and the cold path
-   * provisions without the click.
-   */
-  autoCheck: boolean
   /** Address to bind; `0.0.0.0` behind nginx-proxy (0005: the proxy reaches the container IP, never loopback). */
   bindHost: string
   /** Port the portal listens on (0 = OS-assigned, for tests). */
@@ -88,13 +80,6 @@ function need(record: Record<string, unknown>, key: string, where: string): stri
 function needNum(record: Record<string, unknown>, key: string, where: string): number {
   const value = record[key]
   if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`portal config: ${where}.${key} must be a number`)
-  return value
-}
-
-/** Fail-loud boolean read. */
-function needBool(record: Record<string, unknown>, key: string, where: string): boolean {
-  const value = record[key]
-  if (typeof value !== 'boolean') throw new Error(`portal config: ${where}.${key} must be a boolean`)
   return value
 }
 
@@ -140,7 +125,6 @@ export function parsePortalConfig(text: string): PortalConfig {
     health: { intervalSec: needNum(health, 'intervalSec', 'health'), timeoutSec: needNum(health, 'timeoutSec', 'health'), pollMs: needNum(health, 'pollMs', 'health') },
     bindHost: raw['bindHost'] === undefined ? '127.0.0.1' : need(raw, 'bindHost', 'root'),
     port: raw['port'] === undefined ? 8080 : needNum(raw, 'port', 'root'),
-    autoCheck: raw['autoCheck'] === undefined ? false : needBool(raw, 'autoCheck', 'root'),
   }
 }
 

@@ -93,6 +93,13 @@ describe('reconcile (probe action, FR6)', () => {
     expect(steps(run.stdout)).toEqual(['reconcile info absent', 'ready ok nothing to reconcile'])
   })
 
+  it('maps an empty inspect status to absent (docker that renders no status)', async () => {
+    await seed({ container: '', image: true, http: '200' })
+    const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-1e', 'jereh-pe.cn'])
+    expect(run.code).toBe(0)
+    expect(steps(run.stdout)).toEqual(['reconcile info absent', 'ready ok nothing to reconcile'])
+  })
+
   it('answers healthy when the web answers, whatever the gate code', async () => {
     await seed({ container: 'running', image: true, http: '401' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-2', 'jereh-pe.cn'])

@@ -38,7 +38,12 @@ mark() { seq=$((seq + 1)); printf '[DSH_STEP] %s %s %s %s\n' "$seq" "$1" "$2" "$
 die() { mark "$1" fail "$2"; exit 1; }
 
 container_status() {
-  docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null || echo absent
+  # --format writes nothing (exit 0) when the field expands empty, so an
+  # empty result — missing container, or a host whose docker renders this
+  # template as empty — maps to absent for the state machine.
+  local out
+  out=$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null) || true
+  [ -n "$out" ] && printf '%s\n' "$out" || echo absent
 }
 
 # One probe level: up to $1 attempts at $PROBE_INTERVAL apart against the

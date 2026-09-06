@@ -17,6 +17,8 @@ The `/api` privileged-method pin admitted only loopback pages, so a remote brows
 
 Deployment bake on 10.1.17.58: `docker/dsh-aio/dshhome/jwt-gate.cordis.patch.yml` is baked by every Dockerfile; `entrypoint.sh` appends `--patch /root/.dsh/jwt-gate.cordis.patch.yml` iff `DSH_AUTH_SECRET` is set (≥32 chars, else the container refuses to start). The web profile's `package.json` declares `@deepseek-ai/dsh-host-auth-jwt` (dependency, not `devDependencies`) so the profile-healed resolver finds it. The compose file on the host carries `DSH_AUTH_SECRET` (generated there, never in the repo). Login: `/login` accepts the secret, issues the `dsh_token` HS256 cookie (1 day), and both HTTP and the WebSocket uplinks ride that cookie through the guard.
 
+Deployment gotchas found on the live box: the launcher stops parsing its own flags at the first token it does not know, so the `--patch` overlays must come **immediately after** the `web` subcommand (`dsh web --patch … --no-open …`); and `docker cp` of the entrypoint into the running container must land with mode 755 — `nohup` inside the host's exec-hook silently answers "Permission denied" and nothing supervises.
+
 Deliberately NOT deployed: `DSH_IAM_GATE=1`. `iam.jereh.cn` is unreachable from 10.1.17.58 (curl rc28), and a mounted-but-unreachable OIDC gate 401s/redirects everything including login completion — total lockout.
 
 ## Cause B and verdict (litellm transport) — netops item, no in-repo fix
@@ -37,5 +39,6 @@ Deliberately NOT deployed: `DSH_IAM_GATE=1`. `iam.jereh.cn` is unreachable from 
 ## Pending follow-ups
 
 - Compose still runs the sleep-60000 entrypoint workaround (PID1-freeze); before its ~16.7h expiry move to `command: sleep infinity` + host cron exec of `/home/admin/dsh-aio-supervise.sh`.
+- Dev-instance plugin churn: `DEV_WATCH=1` (the aio default) rewrites `lib/client.js` under the live carrier, and page loads racing a half-written bundle fail with "Failed to load plugins" on a rotating package name; the demo box now runs `DEV_WATCH=0` (baked bundles).
 - `*.jereh-pe.cn` HTTPS certificate expired 2025-06-23 (jr-nginx-proxy serves it for dsh.jereh-pe.cn); renew or the https entry shows a browser warning.
 - A stray "say hi" session and a stale smoke-job DSL remain on the deployed instance (cosmetic).

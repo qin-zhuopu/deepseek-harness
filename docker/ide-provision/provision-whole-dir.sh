@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+# Whole-directory-layout per-user IDE provisioning on the Docker host — the
+# second layout beside provision.sh (2026-09-07 whole-dir PoC). Identical argv,
+# actions, marker protocol, key-on-stdin flow, and probe ladder as provision.sh;
+# only the create-branch storage layout differs:
+#
+#   /data/ide/<uid>/workspace      -> container /workspaces/system-admin  (rw)
+#   /data/ide/<uid>/root           -> container /root, whole directory    (rw)
+#   /data/ide/ide-provision/<uid>  -> container /etc/ide-portal           (ro)
+#
+# Bind mounts shadow image content, so /root must be seeded from the image on
+# first create (the IAM gate patches live at /root/.dsh) or the gate answers
+# 502. Seeding is guarded on .dsh: later re-creates must never clobber the
+# user's accumulated /root state. The trust file is refreshed on every create.
+#
+# argv: <uid> <action> <image> <request-id> <domain-suffix>
+# ACTION=create additionally reads the platform model key as one stdin line
+# (piped by the Jenkins create-stage build from the `ide-model-key` Secret
+# text credential — never argv, never the console, never a build parameter,
+# SR5). Every step prints one
+# `[DSH_STEP] <seq> <step> <ok|fail|info> <detail>` line, which Jenkins
+# forwards to the build console and the portal parses into live events.
+set -euo pipefail
+
+UID_ARG="${1:?uid}"
+ACTION="${2:?action}"
+IMAGE="${3:?image}"
+REQUEST_ID="${4:?request-id}"
+SUFFIX="${5:?domain-suffix}"
+
+case "$UID_ARG" in
+  '' | *[!0-9]*) echo "[DSH_STEP] 0 reconcile fail bad uid argument" >&2; exit 2 ;;
+esac
+case "$ACTION" in create | start | stop | probe) ;; *) exit 2 ;; esac
+[[ "$IMAGE" =~ ^[A-Za-z0-9._/-]+(:[A-Za-z0-9._-]+)?$ ]] || exit 2
+[[ "$SUFFIX" =~ ^[A-Za-z0-9.-]+$ ]] || exit 2
+
+CONTAINER="ide-${UID_ARG}"
+VHOST="${CONTAINER}.${SUFFIX}"
+# Deployment knobs (defaults match the 2026-09-07 PoC; hermetic tests override).
+DATA_ROOT="${IDE_DATA_DIR:-/data/ide}"         # per-uid layout root
+GATE_DIR="${IDE_GATE_DIR:-}"                   # per-uid gate-mount sources; defaults to ${BASE}/ide-provision
+ENV_DIR="${IDE_ENV_DIR:-/opt/ide-provision}"   # transient model-key dir (the ssh user writes here; /run is root-only)
+PROBE_INTERVAL="${IDE_PROBE_INTERVAL:-30}"     # seconds between attempts (0008 health block)
+PROBE_TIMEOUT="${IDE_PROBE_TIMEOUT:-600}"      # hard cap per probe level (0007 C7)
+# Offline trust source: copied into the gate-mount dir on create. The mounted
+# directory must hold only files meant for the user container — never the
+# portal env (it carries the Jenkins token) or portal.yaml.
+TRUST_FILE="${IDE_IAM_TRUST_FILE:-/opt/ide-provision/iam-trust.json}"
+
+BASE="${DATA_ROOT}/${UID_ARG}"
+GATE_DIR="${GATE_DIR:-${BASE}/ide-provision}"
+ENV_FILE="${ENV_DIR}/${CONTAINER}.env"
+ENTRY_HOOK="/usr/local/bin/entrypoint.sh"
+FRONT_PORT=8080
+
+seq=0
+mark() { seq=$((seq + 1)); printf '[DSH_STEP] %s %s %s %s\n' "$seq" "$1" "$2" "${3-}"; }
+die() { mark "$1" fail "$2"; exit 1; }
+
+container_status() {
+  # --format writes nothing (exit 0) when the field expands empty, so an
+  # empty result — missing container, or a host whose docker renders this
+  # template as empty — maps to absent for the state machine.
+  local out
+  out=$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null) || true
+  [ -n "$out" ] && printf '%s\n' "$out" || echo absent
+}
+
+# One probe level: up to $1 attempts at $PROBE_INTERVAL apart against the
+# command formed by "${@:2}" until it exits 0. Sets TRIES, CODE and ELAPSED
+# for the marker detail. The internal level curls the container IP; the proxy
+# level curls the host loopback with the user vhost as Host (0008 Health check).
+probe() {
+  local tries="$1"; shift
+  local waited=0 attempt=0
+  TRIES=0; ELAPSED=0
+  while [ "$attempt" -lt "$tries" ]; do
+    attempt=$((attempt + 1)); TRIES=$attempt
+    if "$@" >/dev/null 2>&1; then ELAPSED=$waited; return 0; fi
+    [ "$attempt" -lt "$tries" ] && { sleep "$PROBE_INTERVAL"; waited=$((waited + PROBE_INTERVAL)); }
+    ELAPSED=$waited
+  done
+  return 1
+}
+
+# Health answer for the DSH_IAM_GATE=1 container (0008 container-side login):
+# 200 before the gate composes, 302/401 once the IAM gate is live. All three
+# prove the front-proxy and dsh web answer; anything else (502/000) means the
+# hook has not run yet or the vhost rule is missing. CODE carries the verdict
+# for the marker detail.
+http_answered() {
+  CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$@") || CODE=000
+  case "$CODE" in 200 | 302 | 401) return 0 ;; *) return 1 ;; esac
+}
+
+container_ip() {
+  docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER" 2>/dev/null || true
+}
+
+# Where the container's vhost/service is declared, for the portal's check
+# chain (requester, 2026-09-06: the page shows the compose file position and
+# service name). Compose-managed containers carry the project labels; the
+# containers this script creates with docker run report that honestly.
+compose_info() {
+  local cf svc line
+  cf=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$CONTAINER" 2>/dev/null || true)
+  svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)
+  if [ -n "$cf" ] && [ -n "$svc" ] && [ -f "$cf" ]; then
+    line=$(grep -n -m1 "^[[:space:]]*${svc}:" "$cf" 2>/dev/null | cut -d: -f1)
+    if [ -n "$line" ]; then mark compose info "${cf}:${line} service=${svc}"; return; fi
+    mark compose info "${cf} service=${svc}"
+    return
+  fi
+  mark compose info "非 compose 管理(docker run,由 provision-whole-dir.sh 创建)"
+}
+
+probe_internal_once() {
+  local ip; ip=$(container_ip)
+  [ -n "$ip" ] || { CODE=000; return 1; }
+  http_answered "http://${ip}:${FRONT_PORT}/"
+}
+
+fire_hook() {
+  docker exec -d "$CONTAINER" "$ENTRY_HOOK" >>/dev/null 2>&1 \
+    || die start-hook "docker exec -d ${ENTRY_HOOK} failed"
+}
+
+# Full start + two-level health path for an existing or just-created
+# container, streaming step events (0008: internal proves the hook ran,
+# proxy proves docker-gen installed the vhost).
+start_and_probe() {
+  fire_hook
+  mark start-hook ok "fired ${ENTRY_HOOK} into ${CONTAINER}"
+  local budget=$((PROBE_TIMEOUT / PROBE_INTERVAL)) refired=0
+  while ! probe "$budget" probe_internal_once; do
+    # C2's freeze signature: PID1 alive, front never answers. Re-fire the
+    # hook exactly once at the first failure, then keep probing.
+    if [ "$refired" -eq 0 ]; then
+      refired=1
+      mark start-hook info "no answer after ${ELAPSED}s, re-firing hook once"
+      fire_hook
+    else
+      die probe-internal "no health answer within ${PROBE_TIMEOUT}s (PID1 freeze? front-proxy down?)"
+    fi
+  done
+  mark probe-internal ok "HTTP ${CODE} after ${TRIES} tries, ${ELAPSED}s"
+  if ! probe 6 http_answered -H "Host: ${VHOST}" http://127.0.0.1/; then
+    die probe-proxy "no health answer through jr-nginx-proxy (last ${CODE}) after ${ELAPSED}s (docker-gen lag or wrong VIRTUAL_HOST)"
+  fi
+  mark probe-proxy ok "HTTP ${CODE} after ${TRIES} tries, ${ELAPSED}s"
+  mark ready ok "request ${REQUEST_ID}"
+}
+
+case "$ACTION" in
+  probe)
+    # Reconcile (FR6): a fast verdict on host truth, never a mutation. The
+    # portal reads the `reconcile` verdict plus the service/compose/health
+    # facts and renders the chain 工号 → 域名 → 服务状态 → Compose 位置 →
+    # 健康检查 → 结论 (requester, 2026-09-06).
+    status=$(container_status)
+    mark service info "docker: ${status}"
+    compose_info
+    case "$status" in
+      absent) mark reconcile info absent; mark ready ok "nothing to reconcile" ;;
+      running)
+        if probe_internal_once; then
+          mark health ok "HTTP ${CODE} from container"
+          mark reconcile info healthy
+        else
+          mark health fail "no answer (last ${CODE})"
+          mark reconcile info running-unhealthy
+        fi
+        mark ready ok "probe done" ;;
+      exited | created | dead) mark reconcile info stopped; mark ready ok "probe done" ;;
+      *) die reconcile "unexpected docker state ${status}" ;;
+    esac
+    ;;
+
+  create)
+    status=$(container_status)
+    if [ "$status" != absent ]; then
+      mark docker-run info "${CONTAINER} already exists (${status}); continuing as start"
+      start_and_probe; exit 0
+    fi
+    if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+      mark image-pull ok "${IMAGE} already local"
+    else
+      mark image-pull info "pulling ${IMAGE}"
+      docker pull "$IMAGE" >/dev/null || die image-pull "pull of ${IMAGE} failed"
+      mark image-pull ok "pulled ${IMAGE}"
+    fi
+    IFS= read -r MODEL_KEY || true
+    [ -n "${MODEL_KEY:-}" ] || die docker-run "no model key on stdin for create (FR10)"
+    # Layout: the three directories exist before docker run — a bind mount
+    # source that docker auto-creates is a root-owned dir masking the miss.
+    mkdir -p "${BASE}/workspace" "${BASE}/root" "${GATE_DIR}"
+    chmod 700 "$BASE"
+    # Bind mounts shadow image content: seed /root once, on first create only
+    # (a later re-create after container removal must keep the user's /root).
+    if [ ! -e "${BASE}/root/.dsh" ]; then
+      local_seed="ide-${UID_ARG}-seed"
+      docker rm -f "$local_seed" >/dev/null 2>&1 || true
+      docker create --name "$local_seed" "$IMAGE" >/dev/null || die docker-run "image create for /root seed failed"
+      docker cp "${local_seed}:/root/." "${BASE}/root/" || { docker rm -f "$local_seed" >/dev/null; die docker-run "/root seed copy failed"; }
+      docker rm "$local_seed" >/dev/null
+      mark docker-run info "seeded ${BASE}/root from image"
+    fi
+    cp "$TRUST_FILE" "${GATE_DIR}/iam-trust.json"
+    umask 077; printf 'NR_API_KEY=%s\n' "$MODEL_KEY" > "$ENV_FILE"
+    trap 'rm -f "$ENV_FILE"' EXIT
+    # The sleep-PID1 two-step is mandatory on this host (C2); the hook fired
+    # by start_and_probe is the real entrypoint.
+    if ! docker run -d --name "$CONTAINER" \
+        --hostname "$CONTAINER" \
+        --network dc_default \
+        --restart unless-stopped \
+        --shm-size 1g \
+        --label "com.jereh.uid=${UID_ARG}" \
+        --label "com.jereh.layout=whole-dir" \
+        -v "${BASE}/workspace:/workspaces/system-admin" \
+        -v "${BASE}/root:/root" \
+        -v "${GATE_DIR}:/etc/ide-portal:ro" \
+        --env-file "$ENV_FILE" \
+        -e "FRONT_PORT=${FRONT_PORT}" -e 'VNC_PUBLIC_URL=/vnc' -e 'RESIZE_ENDPOINT=/resize' \
+        -e "TRUSTED_HOSTS=${VHOST}" \
+        -e "VIRTUAL_HOST=${VHOST}" -e "VIRTUAL_PORT=${FRONT_PORT}" \
+        -e 'HTTPS_METHOD=noredirect' \
+        -e 'DSH_IAM_GATE=1' \
+        --entrypoint bash \
+        "$IMAGE" -c 'sleep 60000' >/dev/null 2> "/tmp/ide-run-err.${BASHPID}"; then
+      if grep -qi 'conflict. the container name' "/tmp/ide-run-err.${BASHPID}"; then
+        mark docker-run info "name conflict (concurrent create); treating as created"
+      else
+        die docker-run "$(tr '\n' ' ' < "/tmp/ide-run-err.${BASHPID}")"
+      fi
+    fi
+    rm -f "/tmp/ide-run-err.${BASHPID}"
+    mark docker-run ok "created ${CONTAINER} on ${VHOST} (whole-dir ${BASE})"
+    start_and_probe
+    ;;
+
+  start)
+    status=$(container_status)
+    case "$status" in
+      absent) die reconcile "no ${CONTAINER} to start" ;;
+      exited | created | dead) docker start "$CONTAINER" >/dev/null || die start-hook "docker start failed" ;;
+      running) ;;
+      *) die reconcile "unexpected docker state ${status}" ;;
+    esac
+    start_and_probe
+    ;;
+
+  stop)
+    status=$(container_status)
+    if [ "$status" = absent ]; then mark ready ok "${CONTAINER} already gone"; exit 0; fi
+    docker stop "$CONTAINER" >/dev/null || die docker-run "docker stop failed"
+    mark ready ok "${CONTAINER} stopped"
+    ;;
+esac

@@ -1,0 +1,98 @@
+// =====================================================================
+// Whole-directory-layout provisioning executor for the ide portal — the
+// second layout beside Jenkinsfile.ide-provision (2026-09-07 whole-dir PoC).
+// The Jenkins job "ide-provision-whole-dir" (new-jenkins.jereh.cn) is
+// configured as Pipeline script from SCM with the `bitbucket` credential;
+// the portal triggers it via buildWithParameters and tails this console for
+// [DSH_STEP] markers — console text is the progress channel, so nothing here
+// may print the model key (SR5). Switching the portal to this layout is a
+// portal.yaml `jenkins.job` change; no portal rebuild.
+//
+// Identical flow, allow-lists, and credential handling as
+// Jenkinsfile.ide-provision; this variant ships
+// docker/ide-provision/provision-whole-dir.sh, whose create branch stores
+// state under /data/ide/<uid>/ with whole-directory bind mounts.
+// =====================================================================
+pipeline {
+  agent { label 'jenkins1 || jenkins2' }
+  parameters {
+    string(name: 'UID', defaultValue: '', description: 'employee number (portal-validated ^[0-9]{1,8}$)')
+    string(name: 'ACTION', defaultValue: 'probe', description: 'create | start | probe | stop')
+    string(name: 'IMAGE_TAG', defaultValue: 'dev-amd64', description: 'tag of harbor.jereh.cn/base/dsh-aio')
+    string(name: 'REQUEST_ID', defaultValue: '', description: 'portal request correlation id')
+  }
+  environment {
+    SSH_USER = 'admin'
+    TARGET_HOST = '10.1.17.58'
+    DOMAIN_SUFFIX = 'jereh-pe.cn'
+  }
+  options { timestamps(); disableConcurrentBuilds(); skipDefaultCheckout(); timeout(time: 25, unit: 'MINUTES') }
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+    stage('Provision on host') {
+      steps {
+        sshagent(credentials: ['ssh']) {
+          script {
+            // Strict allow-lists before ANY interpolation into a shell string:
+            // these values arrive over the Jenkins API from the portal, and
+            // the host command line is the injection surface. The portal
+            // validated the same shapes; this is SR1's second layer.
+            def uid = params.UID ?: ''
+            def action = params.ACTION ?: ''
+            def imageTag = params.IMAGE_TAG ?: ''
+            def requestId = params.REQUEST_ID ?: ''
+            if (!uid.matches('[0-9]{1,8}')) { error "UID must match ^[0-9]{1,8}\$" }
+            if (!(action in ['create', 'start', 'probe', 'stop'])) { error 'ACTION must be create|start|probe|stop' }
+            if (!imageTag.matches('[A-Za-z0-9._-]{1,80}')) { error 'IMAGE_TAG must be a plain tag' }
+            if (!requestId.matches('[A-Za-z0-9._-]{0,64}')) { error 'REQUEST_ID must be a plain token' }
+            sh '''
+set -e
+ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$SSH_USER@$TARGET_HOST" "mkdir -p /opt/ide-provision"
+cat docker/ide-provision/provision-whole-dir.sh | ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" "cat > /opt/ide-provision/provision-whole-dir.sh.new && chmod 755 /opt/ide-provision/provision-whole-dir.sh.new && mv /opt/ide-provision/provision-whole-dir.sh.new /opt/ide-provision/provision-whole-dir.sh"
+'''
+            // The key lives only in the Jenkins Secret text credential
+            // `ide-model-key`; the create-stage build binds it, fails loud on
+            // an unset value, writes it to a workspace file, and pipes that
+            // file through the ssh session's stdin — never argv, never this
+            // console, never a build parameter (0008 Model key flow).
+            def image = "harbor.jereh.cn/base/dsh-aio:${imageTag}"
+            if (action == 'create') {
+              withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')]) {
+                sh(label: 'stage credential key', script: '''
+set -e
+if [ "${MODEL_KEY_SECRET:-}" = "" ]; then echo "credential ide-model-key is empty; refusing create (FR10)"; exit 1; fi
+umask 077
+printf '%s\\n' "$MODEL_KEY_SECRET" > .model-key.stdin
+''')
+              }
+              // The script ships to the host above, so run it by path: stdin
+              // then carries the key alone (with `bash -s` the remote shell
+              // would execute the key as a script line and print it).
+              sh(label: 'provision on host', script: """
+set -e
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash /opt/ide-provision/provision-whole-dir.sh' \\
+  '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX' < .model-key.stdin
+""")
+            } else {
+              sh(label: 'provision on host', script: """
+set -e
+ssh -o StrictHostKeyChecking=no "$SSH_USER@$TARGET_HOST" 'bash /opt/ide-provision/provision-whole-dir.sh' \\
+  '${uid}' '${action}' '${image}' '${requestId}' '$DOMAIN_SUFFIX'
+""")
+            }
+          }
+        }
+      }
+    }
+  }
+  post {
+    always {
+      // Belt for every path above: the staged key leaves no workspace residue.
+      sh(label: 'wipe staged key', script: 'rm -f .model-key.stdin || true')
+    }
+  }
+}

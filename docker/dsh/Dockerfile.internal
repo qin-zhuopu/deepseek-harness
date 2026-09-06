@@ -38,10 +38,18 @@ RUN npm config set registry ${NPM_REGISTRY}
 
 # ── app ──
 WORKDIR /workspaces/deepseek-harness
+
+# Warm the pnpm store from the lockfile alone: this layer only invalidates
+# when dependencies change, so source-only commits keep the ~900-package
+# download cached (Nexus round-trips make a cold install the build's floor).
+COPY pnpm-lock.yaml ./
+RUN pnpm fetch
+
 COPY . .
 
-# Install (lockfile may carry local mirror/policy tweaks)
-RUN pnpm install --no-frozen-lockfile
+# Install from the warmed store (lockfile may carry local mirror/policy
+# tweaks); fetch's store makes this a link step unless the lockfile moved.
+RUN pnpm install --no-frozen-lockfile --offline
 
 # The build context has no .git, so provide the source commit explicitly.
 # client-build-environment.ts uses this instead of calling `git rev-parse HEAD`.

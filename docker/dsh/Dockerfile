@@ -41,10 +41,16 @@ WORKDIR /workspaces/deepseek-harness
 # CI=true.
 ENV CI=true
 
+# Warm the pnpm store from the lockfile alone: this layer only invalidates
+# when dependencies change, so source-only commits keep the ~900-package
+# download cached.
+COPY pnpm-lock.yaml ./
+RUN pnpm fetch
+
 COPY . .
 
-# Install (immutable)
-RUN pnpm install --frozen-lockfile
+# Install (immutable) from the warmed store.
+RUN pnpm install --frozen-lockfile --offline
 
 # .git now ships in the image (see .dockerignore) so the dev container can
 # git pull/diff. The build still takes the commit as an explicit arg rather

@@ -54,7 +54,7 @@ key 只有一个家:全局凭据库里的 Jenkins Secret text 凭据 `ide-model-
 
 1. create 阶段的 build 用 `withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')])` 绑定该凭据,绑定值为空即失败即报。
 2. 绑定作用域内,任务在 workspace 以 `umask 077` 把取值落成文件,再把这个文件通过 ssh 会话的 stdin 管给 `provision.sh`;脚本的 trap 清掉任何残留,Jenkins `post` 块在每条路径上抹掉暂存文件。
-3. 宿主机上 `provision.sh` 写出一次性 env 文件——`umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /run/ide-<uid>.env`——以 `docker run --env-file` 交给它,用完立刻删除;取值以文件内容(而不是可见参数)的形式到达 daemon(`docker run -e NR_API_KEY=$KEY` 会把 key 暴露给所有本地用户的 `ps`)。
+3. 宿主机上 `provision.sh` 写出一次性 env 文件——`umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /opt/ide-provision/ide-<uid>.env`——以 `docker run --env-file` 交给它,用完立刻删除;取值以文件内容(而不是可见参数)的形式到达 daemon(`docker run -e NR_API_KEY=$KEY` 会把 key 暴露给所有本地用户的 `ps`)。
 4. 容器把该 env 存进自身配置,`start`/`probe`/`stop` 之后都不再携带 key;Portal 页面、步骤 marker、Jenkins console 从不打印它。
 
 接受的残余风险(SR5):每个用户容器自己的 shell 都能经 `docker exec`/`env` 读到 key,所以这把 key 是舰队级、可吊销、有消费上限的;Jenkins 管理员按定义就能读凭据库。凭据未配置时的 create 在 key 步骤以点名错误失败,不会产出无 key 的容器。
@@ -81,7 +81,7 @@ create 阶段的 build 另绑定 Secret text 凭据 `ide-model-key`(模型 key �
 宿主机上的 `ACTION=create`,其中的值只在 uid 通过 SR1 校验后才参与插值(key 从 `ide-model-key` 凭据绑定经 stdin 到达,由 `provision.sh` 写成下面这条 env 文件,key 因此不进入这条命令行):
 
 ```bash
-umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /run/ide-14409.env
+umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /opt/ide-provision/ide-14409.env
 docker run -d --name ide-14409 \
   --hostname ide-14409 \
   --network dc_default \
@@ -90,14 +90,14 @@ docker run -d --name ide-14409 \
   --label com.jereh.uid=14409 \
   -v ide-14409-workspace:/root/workspace \
   -v ide-14409-dshome:/root/.dsh \
-  --env-file /run/ide-14409.env \
+  --env-file /opt/ide-provision/ide-14409.env \
   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize \
   -e TRUSTED_HOSTS=ide-14409.jereh-pe.cn \
   -e VIRTUAL_HOST=ide-14409.jereh-pe.cn -e VIRTUAL_PORT=8080 \
   -e HTTPS_METHOD=noredirect -e DSH_IAM_GATE=1 \
   --entrypoint bash \
   harbor.jereh.cn/base/dsh-aio:dev-amd64 -c 'sleep 60000'
-rm -f /run/ide-14409.env
+rm -f /opt/ide-provision/ide-14409.env
 ```
 
 在这台宿主机上,`--entrypoint bash -c 'sleep 60000'` 这个覆盖不是可选项(C2):真正的 entrypoint 改由 `ACTION=start`(或 create 步骤末尾)在每次启动时精确触发一次:

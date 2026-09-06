@@ -54,7 +54,7 @@ The key has one home: the Jenkins Secret text credential `ide-model-key` in the 
 
 1. The create-stage build binds the credential with `withCredentials([string(credentialsId: 'ide-model-key', variable: 'MODEL_KEY_SECRET')])` and fails loud when the binding is empty.
 2. Inside the binding the job stages the value in a workspace file under `umask 077` and pipes that file through the ssh session's stdin to `provision.sh`, which unlinks any residue in a trap; the Jenkins `post` block wipes the staged file on every path.
-3. On the host `provision.sh` writes a one-shot env file — `umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /run/ide-<uid>.env` — passes it to `docker run --env-file`, and removes it immediately after; the value reaches the daemon as file content, not as a visible argument (`docker run -e NR_API_KEY=$KEY` would expose it to every local user via `ps`).
+3. On the host `provision.sh` writes a one-shot env file — `umask 077; printf 'NR_API_KEY=%s\n' "$KEY" > /opt/ide-provision/ide-<uid>.env` — passes it to `docker run --env-file`, and removes it immediately after; the value reaches the daemon as file content, not as a visible argument (`docker run -e NR_API_KEY=$KEY` would expose it to every local user via `ps`).
 4. The container stores the env in its own configuration, so `start`/`probe`/`stop` runs never carry the key again, and the portal page, step markers, and Jenkins console never print it.
 
 Accepted residual risks (SR5): every user container's own shell can read the key via `docker exec`/`env`, so the key is fleet-wide, revocable, and spend-capped; Jenkins admins can read the credential store by definition. A create with an unset credential fails at the key step with a named error rather than producing a keyless container.
@@ -81,7 +81,7 @@ Job config: `disableConcurrentBuilds()` plus a quiet period absorbs duplicate tr
 `ACTION=create` on the host, values interpolated only after the uid passes SR1 (the key arrives on stdin from the `ide-model-key` credential binding, written by `provision.sh` to the env file shown here, so the key never enters this command line):
 
 ```bash
-umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /run/ide-14409.env
+umask 077; printf 'NR_API_KEY=%s\n' "$KEY_FROM_STDIN" > /opt/ide-provision/ide-14409.env
 docker run -d --name ide-14409 \
   --hostname ide-14409 \
   --network dc_default \
@@ -90,14 +90,14 @@ docker run -d --name ide-14409 \
   --label com.jereh.uid=14409 \
   -v ide-14409-workspace:/root/workspace \
   -v ide-14409-dshome:/root/.dsh \
-  --env-file /run/ide-14409.env \
+  --env-file /opt/ide-provision/ide-14409.env \
   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize \
   -e TRUSTED_HOSTS=ide-14409.jereh-pe.cn \
   -e VIRTUAL_HOST=ide-14409.jereh-pe.cn -e VIRTUAL_PORT=8080 \
   -e HTTPS_METHOD=noredirect -e DSH_IAM_GATE=1 \
   --entrypoint bash \
   harbor.jereh.cn/base/dsh-aio:dev-amd64 -c 'sleep 60000'
-rm -f /run/ide-14409.env
+rm -f /opt/ide-provision/ide-14409.env
 ```
 
 The `--entrypoint bash -c 'sleep 60000'` override is not optional on this host (C2): the real entrypoint is then fired exactly once per start by `ACTION=start`/the create step's tail:

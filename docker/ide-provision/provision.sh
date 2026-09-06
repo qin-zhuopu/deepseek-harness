@@ -25,7 +25,7 @@ case "$ACTION" in create | start | stop | probe) ;; *) exit 2 ;; esac
 CONTAINER="ide-${UID_ARG}"
 VHOST="${CONTAINER}.${SUFFIX}"
 # Deployment knobs (hermetic tests and unusual hosts override; defaults match 0008).
-ENV_DIR="${IDE_ENV_DIR:-/run}"       # directory for the transient model-key file
+ENV_DIR="${IDE_ENV_DIR:-/opt/ide-provision}"   # transient model-key dir (the ssh user writes here; /run is root-only)
 PROBE_INTERVAL="${IDE_PROBE_INTERVAL:-30}"   # seconds between attempts (0008 health block)
 PROBE_TIMEOUT="${IDE_PROBE_TIMEOUT:-600}"    # hard cap per probe level (0007 C7)
 

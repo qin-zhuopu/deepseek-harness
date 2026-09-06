@@ -80,7 +80,7 @@ RUN set -eux; \
     apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access update \
  && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=8 -o Acquire::http::Pipeline-Depth=0 -o Acquire::Queue-Mode=access install -y --no-install-recommends \
       tigervnc-standalone-server wmctrl fluxbox novnc websockify x11-utils curl \
-      autocutsel xsel \
+      autocutsel xsel git \
  && rm -rf /var/lib/apt/lists/*
 
 # 安装 jenkins-zh/jcli，供容器内 agent 触发 Jenkins 构建、查看日志与状态。
@@ -103,6 +103,25 @@ RUN set -eux; \
     test -n "$jcli_bin"; \
     install -m 0755 "$jcli_bin" /usr/local/bin/jcli; \
     rm -rf /tmp/jcli.tar.gz /tmp/jcli-extract
+
+# 安装 jereh-cli（@jereh/jereh-cli，bitbucket jc/jereh-cli 仓库源码安装）。
+# 装在镜像层 /opt/jereh-cli：/root 被 provision 整目录 bind-mount，不能放 /root。
+# 入口 jereh-cli.js 顶层 require @jereh/jc-cli（workspace 包），所以必须装全部
+# workspace 并先 build:cli（tsc 产出 packages/*/dist），不能只装根包；
+# 仓库 gitignore 了 package-lock.json，故用 npm install 而非 npm ci。
+# 运行时依赖（commander/playwright-core 等）大多在根 devDependencies，构建后不要 prune。
+# bin 软链到 /usr/local/bin（jc/jereh/jereh-cli 三个名字都在 PATH）。
+# 升级 CLI：改 JEREH_CLI_GIT_REF 重新构建镜像，或重建容器前在旧容器
+# git -C /opt/jereh-cli pull && npm install && npm run build:cli。
+ARG JEREH_CLI_GIT_URL=https://bitbucket.jereh.cn/scm/jc/jereh-cli.git
+ARG JEREH_CLI_GIT_REF=master
+RUN set -eux; \
+    git clone --depth 1 --branch "${JEREH_CLI_GIT_REF}" "${JEREH_CLI_GIT_URL}" /opt/jereh-cli; \
+    cd /opt/jereh-cli; \
+    npm install --registry "${NPM_REGISTRY}" --no-audit --no-fund; \
+    npm run build:cli; \
+    for b in jereh-cli jereh jc; do ln -sf /opt/jereh-cli/jereh-cli.js "/usr/local/bin/${b}"; done; \
+    /usr/local/bin/jc --version
 
 # Desktop-fit helpers (see Dockerfile.prod for the rationale).
 COPY vnc-resize-sidecar.py /usr/local/bin/vnc-resize-sidecar.py

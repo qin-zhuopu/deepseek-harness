@@ -364,7 +364,7 @@ export class Orchestrator {
       case 'start-hook':
         if (marker.detail.includes('skipping start')) return { step: '启动服务', status: 'info', detail: 'IDE 已在运行,无需启动' }
         return marker.status === 'ok'
-          ? { step: '启动服务', status: 'ok', detail: '服务已启动' }
+          ? { step: '启动服务', status: 'info', detail: '服务启动中,健康自检进行中…' }
           : { step: '启动服务', status: 'info', detail: '首次无响应,正在重试启动…' }
       case 'probe-internal':
         return marker.status === 'ok'

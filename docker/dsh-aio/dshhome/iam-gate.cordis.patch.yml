@@ -4,10 +4,16 @@
 # jereh-pe.cn — signs in on its own domain and keeps the verified id_token as
 # its own host-scoped cookie; the IAM accepts these unregistered callbacks.
 # issuer/clientId default to the production IAM and accept IAM_ISSUER /
-# IAM_CLIENT_ID overrides.
+# IAM_CLIENT_ID overrides. IAM_TRUST_FILE names the offline trust file (the
+# provider's discovery + JWKS JSON): with it the gate never fetches, which is
+# how a deployment whose server cannot reach the IAM still verifies tokens.
+# The 0008 provisioning mounts that file at /etc/ide-portal/iam-trust.json for
+# user containers whose network has no egress to the IAM; the default covers
+# that deployment, and setting IAM_TRUST_FILE="" restores live discovery.
 - insert:
     - id: auth-iam
       name: '@deepseek-ai/dsh-host-auth-iam'
       config:
         issuer: !!js 'process.env.IAM_ISSUER || "https://iam.jereh.cn/idp"'
         clientId: !!js 'process.env.IAM_CLIENT_ID || "EnterpriseDingtalk"'
+        trustFile: !!js 'process.env.IAM_TRUST_FILE ?? "/etc/ide-portal/iam-trust.json"'

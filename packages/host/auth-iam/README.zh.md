@@ -10,7 +10,7 @@
 
 `GET /logout` 清除会话 cookie（提供方自己的 `usk` 会话留在提供方主机上，不受干涉）。未认证的浏览器导航 `302` 重定向到 `/login?next=…`；其余请求得到 `401` 加 `WWW-Authenticate: Bearer`——本闸门不签发自己的 token，脚本化客户端属于 `auth-jwt`。
 
-必填配置：`issuer`（`http(s)://` URL；发现与 JWKS 都从这里读取）与 `clientId`。可选：`redirectPath`、`cookie`、`loginPath`、`logoutPath`、`secureCookie`、`refreshMinutes`、`fetchTimeoutMs`，以及 `allowIssuerMismatch`——为以提供方签发的别名主机访问的部署准备的逃生口；它只跳过 `iss` 相等校验（签名与 `aud` 仍然约束 token）。
+必填配置：`issuer`（`http(s)://` URL；发现与 JWKS 都从这里读取）与 `clientId`。可选：`redirectPath`、`cookie`、`loginPath`、`logoutPath`、`secureCookie`、`refreshMinutes`、`fetchTimeoutMs`、`trustFile`，以及 `allowIssuerMismatch`——为以提供方签发的别名主机访问的部署准备的逃生口；它只跳过 `iss` 相等校验（签名与 `aud` 仍然约束 token）。
 
 为随附 Web 组合配置生产环境 IAM（profile patch 层；`redirectPath` 必须与提供方登记一致——真实 IAM 要求外部可见 URL）：
 
@@ -20,6 +20,7 @@
   config:
     issuer: https://iam.jereh.cn/idp
     clientId: EnterpriseDingtalk
+    trustFile: /etc/ide-portal/iam-trust.json
 ```
 
 ## Model Experience

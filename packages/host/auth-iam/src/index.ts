@@ -37,6 +37,7 @@ import {
 } from '@deepseek-ai/dsh-host-auth-core'
 import { createProviderSource, type ProviderDocument } from './discovery.ts'
 import { verifyIdToken, type IdTokenClaims } from './id-token.ts'
+import { loadTrustFile } from './trust.ts'
 
 /** Stable Cordis plugin name. */
 export const name = 'auth-iam'
@@ -67,6 +68,12 @@ export interface Config {
   refreshMinutes?: number
   /** Timeout for one discovery or JWKS fetch in milliseconds. Default: 8000. */
   fetchTimeoutMs?: number
+  /** Path to a JSON file with the provider's two published documents
+   * (`{"discovery": …, "jwks": …}`) captured from a network that reaches the
+   * IAM. Offline deployments answer login and verification from the file and
+   * never fetch; loading refuses an unreadable, malformed, keyless file or a
+   * file whose issuer disagrees with `issuer`. */
+  trustFile?: string
 }
 
 /** Default callback path and provider-fetch knobs (schema mirrors). */
@@ -92,6 +99,7 @@ export const Config: z<Config> = z.object({
   allowIssuerMismatch: z.boolean().default(false),
   refreshMinutes: z.natural().min(1).default(DEFAULT_REFRESH_MINUTES),
   fetchTimeoutMs: z.natural().min(1000).default(DEFAULT_FETCH_TIMEOUT_MS),
+  trustFile: z.string().default(''),
 })
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -157,10 +165,15 @@ export function apply(ctx: Context, config: Config): void {
   const fetchTimeoutMs = config.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
   const nowSeconds = (): number => Math.floor(Date.now() / 1000)
 
+  // An offline deployment serves login and verification from the seeded file
+  // and never fetches; a broken file refuses the gate at load.
+  const staticDoc = config.trustFile === undefined || config.trustFile === ''
+    ? undefined
+    : loadTrustFile(config.trustFile, config.issuer)
   const provider = createProviderSource({ issuer: config.issuer, refreshMinutes, timeoutMs: fetchTimeoutMs }, globalThis.fetch)
   // The guard verdict must be synchronous: request-time verification runs
   // against the hot copy, and only the sign-in round-trip awaits a fetch.
-  let document: ProviderDocument | undefined
+  let document: ProviderDocument | undefined = staticDoc
 
   function verifyTokenPresented(req: IncomingMessage): IdTokenClaims | undefined {
     const token = presentedToken(req, cookieName)
@@ -181,8 +194,15 @@ export function apply(ctx: Context, config: Config): void {
   }
 
   async function refreshDocument(): Promise<ProviderDocument | undefined> {
+    if (staticDoc !== undefined) return staticDoc
     document = await provider.get() ?? document
     return document
+  }
+
+  async function forceRefresh(): Promise<void> {
+    if (staticDoc !== undefined) return
+    provider.invalidate()
+    await refreshDocument()
   }
 
   mountAuthSurface(ctx, {
@@ -282,11 +302,6 @@ export function apply(ctx: Context, config: Config): void {
       json(res, 200, { ok: true, location: next === '' ? '/' : next })
     },
   }), 'auth-iam: callback route')
-
-  async function forceRefresh(): Promise<void> {
-    provider.invalidate()
-    await refreshDocument()
-  }
 }
 
 /** Read (unverified) the `iss` claim for the issuer-mismatch escape hatch. */

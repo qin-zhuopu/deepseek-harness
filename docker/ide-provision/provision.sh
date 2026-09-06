@@ -33,6 +33,17 @@ ENV_FILE="${ENV_DIR}/${CONTAINER}.env"
 ENTRY_HOOK="/usr/local/bin/entrypoint.sh"
 FRONT_PORT=8080
 
+# The IAM gate inside the user container verifies tokens offline from the same
+# trust file the portal uses (0008 offline trust): the container network has no
+# egress to the IAM. The host path is overridable for hosts that seed it
+# elsewhere; an absent file leaves the mount off and the gate on live
+# discovery, which such a network cannot complete — visible as the gate's 502.
+TRUST_FILE="${IDE_IAM_TRUST_FILE:-/opt/ide-provision/iam-trust.json}"
+TRUST_MOUNT=()
+if [ -f "$TRUST_FILE" ]; then
+  TRUST_MOUNT=(-v "$TRUST_FILE:/etc/ide-portal/iam-trust.json:ro")
+fi
+
 seq=0
 mark() { seq=$((seq + 1)); printf '[DSH_STEP] %s %s %s %s\n' "$seq" "$1" "$2" "${3-}"; }
 die() { mark "$1" fail "$2"; exit 1; }
@@ -158,6 +169,7 @@ case "$ACTION" in
         --label "com.jereh.uid=${UID_ARG}" \
         -v "${CONTAINER}-workspace:/root/workspace" \
         -v "${CONTAINER}-dshome:/root/.dsh" \
+        "${TRUST_MOUNT[@]}" \
         --env-file "$ENV_FILE" \
         -e "FRONT_PORT=${FRONT_PORT}" -e 'VNC_PUBLIC_URL=/vnc' -e 'RESIZE_ENDPOINT=/resize' \
         -e "TRUSTED_HOSTS=${VHOST}" \

@@ -131,10 +131,14 @@ async function startIdp(): Promise<FakeIdp> {
 }
 
 /** Boot webserver + auth-iam pointed at the fake provider through the real Loader. */
-async function loadComposition(extra = ''): Promise<Context> {
-  // (extra appends literal config lines, e.g. '    allowIssuerMismatch: true')
+async function loadComposition(
+  extra: string | ((provider: FakeIdp, dir: string) => Promise<string>) = '',
+): Promise<Context> {
+  // (extra appends literal config lines, e.g. '    allowIssuerMismatch: true';
+  // the callback form seeds files in the composition dir first)
   const provider = await startIdp()
   root = await mkdtemp(join(tmpdir(), 'dsh-auth-iam-'))
+  const extraLines = typeof extra === 'string' ? extra : await extra(provider, root)
   const configPath = join(root, 'cordis.yml')
   await writeFile(configPath, [
     "- name: '@deepseek-ai/dsh-host-webserver'",
@@ -146,7 +150,7 @@ async function loadComposition(extra = ''): Promise<Context> {
     '  config:',
     `    issuer: '${provider.issuer}'`,
     `    clientId: '${CLIENT}'`,
-    extra,
+    extraLines,
     '',
   ].filter(line => line !== '').join('\n'))
 
@@ -516,5 +520,62 @@ describe('auth-iam real composition', () => {
       expect(refused.status).toBe(401)
       expect(refused.body).toContain('verification failed')
     }
+  })
+
+  it('signs in and verifies from the seeded trust file with the provider unreachable', { timeout: 60_000 }, async () => {
+    const seed = async (provider: FakeIdp, dir: string): Promise<string> => {
+      const readJson = async (url: string): Promise<unknown> => JSON.parse(await (await fetch(url)).text()) as unknown
+      const path = join(dir, 'iam-trust.json')
+      await writeFile(path, JSON.stringify({
+        discovery: await readJson(`${provider.issuer}/.well-known/openid-configuration`),
+        jwks: await readJson(`${provider.issuer}/oidc/getPublicKey`),
+      }))
+      // The seeding fetches are not the gate's; only traffic after this point counts.
+      provider.hits.length = 0
+      return path
+    }
+    const loaded = await loadComposition(async (provider, dir) => {
+      const trustFile = await seed(provider, dir)
+      provider.failDiscovery = true // every IAM route answers 500 from here on
+      return `    trustFile: '${trustFile}'`
+    })
+    const provider = idp!
+    const server = loaded.webServer
+    const port = server.port
+    server.register({ kind: 'prefix', path: '/api', handler: (_req, res) => { res.writeHead(200); res.end('API') } })
+
+    // The seeded file answers login and the callback: no provider route ran.
+    expect((await request(port, '/api/x')).status).toBe(401)
+    const { state, stateCookie } = await beginSignIn(port)
+    expect(provider.hits).toEqual([])
+    const ok = await request(port, '/auth/callback', {
+      method: 'POST', headers: { cookie: `dsh_oidc_state=${stateCookie}` },
+      body: new URLSearchParams({ id_token: idToken(provider.issuer), state }),
+    })
+    expect(ok.status).toBe(200)
+    expect((await request(port, '/api/x', { headers: { cookie: `${COOKIE}=${cookieValue(ok.cookie, COOKIE)}` } })).body).toBe('API')
+    expect(provider.hits).toEqual([])
+
+    // A key outside the seeded set is refused even though a forced re-read
+    // would find it: the file is the whole trust story.
+    const other = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    const again = await beginSignIn(port)
+    const rotated = await request(port, '/auth/callback', {
+      method: 'POST', headers: { cookie: `dsh_oidc_state=${again.stateCookie}` },
+      body: new URLSearchParams({ id_token: idTokenWith(other.privateKey, provider.issuer), state: again.state }),
+    })
+    expect(rotated.status).toBe(401)
+    expect(rotated.body).toContain('verification failed')
+  })
+
+  it('refuses to mount on a trust file the configured issuer disagrees with', { timeout: 60_000 }, async () => {
+    await expect(loadComposition(async (provider, dir) => {
+      const path = join(dir, 'iam-trust.json')
+      await writeFile(path, JSON.stringify({
+        discovery: { issuer: 'https://iam-other.example/idp', authorization_endpoint: 'https://iam-other.example/idp/auth', jwks_uri: 'https://iam-other.example/idp/jwks' },
+        jwks: { keys: [{ ...provider.keys[0] }] },
+      }))
+      return `    trustFile: '${path}'`
+    })).rejects.toThrow(/disagrees with the configured issuer/)
   })
 })

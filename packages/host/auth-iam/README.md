@@ -10,7 +10,7 @@ Discovery reads `<issuer>/.well-known/openid-configuration` first and the top-le
 
 `GET /logout` clears the session cookie (the provider's own `usk` session lives on the provider's host and is left alone). Unauthenticated browser navigation redirects `302` to `/login?next=…`; everything else gets `401` with `WWW-Authenticate: Bearer` — this gate does not issue its own tokens, so scripted clients belong to `auth-jwt`.
 
-Required config: `issuer` (an `http(s)://` URL; discovery and JWKS are read from it) and `clientId`. Optional: `redirectPath`, `cookie`, `loginPath`, `logoutPath`, `secureCookie`, `refreshMinutes`, `fetchTimeoutMs`, and `allowIssuerMismatch` — the escape hatch for a deployment reached on a host alias the provider issues tokens for; it skips only the `iss` equality check (signature and `aud` still bind the token).
+Required config: `issuer` (an `http(s)://` URL; discovery and JWKS are read from it) and `clientId`. Optional: `redirectPath`, `cookie`, `loginPath`, `logoutPath`, `secureCookie`, `refreshMinutes`, `fetchTimeoutMs`, `trustFile`, and `allowIssuerMismatch` — the escape hatch for a deployment reached on a host alias the provider issues tokens for; it skips only the `iss` equality check (signature and `aud` still bind the token).
 
 Configuring the shipped Web composition against the production IAM (a profile patch layer; `redirectPath` must match the provider registration — the real IAM requires the externally visible URL):
 
@@ -20,6 +20,7 @@ Configuring the shipped Web composition against the production IAM (a profile pa
   config:
     issuer: https://iam.jereh.cn/idp
     clientId: EnterpriseDingtalk
+    trustFile: /etc/ide-portal/iam-trust.json
 ```
 
 ## Model Experience

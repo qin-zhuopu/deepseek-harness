@@ -6,7 +6,7 @@ Status: draft for review. The Open items section lists every decision still wait
 
 ## Purpose and scope
 
-Employees reach a personal DSH Web IDE through one stable entry URL. After enterprise OIDC login, the entry resolves the user's identity to a per-user domain `ide-<uid>.jereh-pe.cn`, starts that user's container if it is not running, shows the start-up and check progress as live log lines in the browser, and finally redirects the browser to the user's own IDE.
+Employees reach a personal DSH Web IDE through one stable entry URL. After enterprise OIDC login, the entry resolves the user's identity to a per-user domain `ide-<uid>.jereh-pe.cn` and checks that user's service — on arrival in auto entry mode, on the user's click on the start page in manual mode — starts the container when it is missing, shows the start-up and check progress as live log lines in the browser, and finally hands the browser to the user's own IDE.
 
 In scope: identity-to-domain resolution, on-demand container provisioning, health verification, live progress reporting, the redirect. Out of scope: the IDE product itself, image building (owned by the Jenkins pipeline in [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.md)), and per-user data backup.
 
@@ -42,8 +42,8 @@ The token carries **no email and no group claim**. Any entry restriction to a su
 
 - **FR1 Identity**: the portal authenticates with the IdP over the implicit flow that the Jereh IAM speaks (C10): the browser relays the `id_token` out of the redirect fragment, and the portal verifies signature, `iss`, `aud`, and `exp` against the published JWKS before reading any claim. The uid comes from the verified `sub` claim, cross-checked against `userId` — never from a user-editable field (O1).
 - **FR2 Domain derivation**: from the verified uid, the portal derives exactly `ide-<uid>.jereh-pe.cn` and the container name `ide-<uid>`. The uid must match `^[0-9]{1,8}$` before any name, domain, volume, or command is built from it (see SR1).
-- **FR3 Warm path**: if the user's container exists and passes its health check, the entry answers with an immediate HTTP redirect to the user's IDE. No intermediate page, no log stream.
-- **FR4 Cold path**: if the container does not exist, the portal provisions it end to end: create the container with `docker run` (executed through Jenkins, per the requester's decision), start it, verify health, then hand the browser the user's IDE URL.
+- **FR3 Warm path**: when a service check answers healthy — triggered by arrival in auto entry mode, or by the start page's check button in manual mode — the portal hands the browser the user's IDE url. No provisioning runs.
+- **FR4 Cold path**: when the check finds no container, the portal provisions it end to end from that same check: create the container with `docker run` (executed through Jenkins, per the requester's decision), start it, verify health, then hand the browser the user's IDE URL. Entry mode is the portal config `autoCheck` ([0008 Configuration](0008-per-user-ide-design.md)): `true` reconciles on arrival and reaches Docker without a click (the original entry flow); `false` renders the start page and an entry that is never clicked creates no Jenkins build and touches no Docker state. The shipped deployment runs `autoCheck: false`; reverting to auto is a config change, not a code change (requester decision, 2026-09-06: keep both paths, run manual until it proves out).
 - **FR5 Live progress**: every check and provisioning step — probe results, Jenkins acceptance, container start, image pull, health attempts, failures — appears in the browser as a timestamped log line within seconds of happening, on the portal page the user already has open.
 - **FR6 Crash-safe re-entry**: after a host reboot or a half-started container, a new entry detects the real Docker state (reconcile) and takes the shortest path back to healthy, including re-firing the start hook on 10.1.17.58's PID1 freeze (C2).
 - **FR7 One provisioning per user**: two tabs or devices entering at once must produce exactly one provisioning action; the second viewer subscribes to the same live log.
@@ -56,7 +56,7 @@ The token carries **no email and no group claim**. Any entry restriction to a su
 | # | Story | Acceptance |
 |---|---|---|
 | US1 | As a first-time user, after login I watch my IDE being built and land in it. | Step-level log from creation to health; redirect only after both health probes pass; cold path ≤ 5 min typical (image pre-pulled). |
-| US2 | As a returning user, login drops me straight into my IDE. | Single 302, no intermediate page; overhead < 1 s plus the IDE's own load. |
+| US2 | As a returning user, login gets me into my IDE — automatically in auto mode, with one click in manual mode. | auto mode: single 302, no intermediate page. manual mode: the start page renders immediately, the check button's probe answers HEALTHY and the page navigates; no provisioning runs. |
 | US3 | As a user after a host reboot, entering again just works. | Stopped or frozen container is detected, started with the hook, health-checked, redirected; the page says "recovering", not "error". |
 | US4 | As a user with two tabs, I never get two provisioning runs. | One Jenkins job per user at a time; second tab streams the same events. |
 | US5 | As a user whose provisioning failed, I see where and why. | Failed step highlighted with its error and the Jenkins console link; one-click retry re-reconciles first. |
@@ -88,7 +88,7 @@ stateDiagram-v2
 
 ## Sequence: cold start
 
-The warm path ends at the status probe: it answers HEALTHY, `GET /` finishes with the `302`, and none of the provisioning tail runs.
+The warm path ends at the status probe: it answers HEALTHY and the browser receives the IDE url; none of the provisioning tail runs. In auto entry mode the arrival triggers the probe and the answer lands as a `302` from `GET /`; in manual mode (the shipped default) the check button triggers it and the page navigates. The sequence below shows manual mode; in auto mode the probe fires on arrival instead of on the click.
 
 ```mermaid
 sequenceDiagram
@@ -110,9 +110,11 @@ sequenceDiagram
     P->>P: extract sub, cross-check userId, validate ^[0-9]{1,8}$
     P-->>B: session cookie, 302 back to /
     B->>P: GET / (authenticated)
+    P-->>B: start page (no probe, no provisioning until clicked)
+    B->>P: POST /api/provision (user clicks the check button)
     P->>J: status probe (docker state + health)
     J-->>P: NO_SERVICE
-    P-->>B: start page opens SSE stream
+    P-->>B: SSE stream carries the step log
     P->>J: trigger ide-provision (uid, action=create)
     Note over P,J: step events stream to the page from here on
     J->>H: docker run --name ide-<uid> --network dc_default -e VIRTUAL_HOST=... --env-file <one-shot 600 file with NR_API_KEY>
@@ -122,7 +124,7 @@ sequenceDiagram
     J->>C: probe 1: internal http://ide-<uid>:8080/ -> 200/302/401 (gate)
     J->>N: probe 2: proxy GET with Host ide-<uid>.jereh-pe.cn -> 200/302/401
     P-->>B: READY event with the IDE url
-    B->>C: browser navigates (warm path: the plain 302)
+    B->>C: browser navigates (warm path: the same button answers HEALTHY, no provisioning)
 ```
 
 ## Environment constraints (verified, not assumed)

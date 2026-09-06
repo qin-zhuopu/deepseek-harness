@@ -29,10 +29,10 @@ flowchart LR
 
 | 路由 | 行为 |
 |---|---|
-| `GET /` | 无会话 cookie → 闸门的 `/login` 重定向。有会话 → reconcile;HEALTHY → 对用户 IDE 发 `302`;其余情况渲染启动页(FR3、FR4)。 |
-| `GET /api/state` | 当前状态快照:状态、最近步骤、就绪时的 IDE url。页面 bootstrap 与 SSE 重连的基线。 |
+| `GET /` | 无会话 cookie → 闸门的 `/login` 重定向。有会话 → `autoCheck: true` 在到达时 reconcile(HEALTHY → 对用户 IDE 发 `302`;否则渲染启动页,页面自行启动本轮);`autoCheck: false`(线上默认)只渲染启动页,用户点击检查按钮向 `/api/provision` 发 POST 之前不探测 Docker(FR3、FR4)。 |
+| `GET /api/state` | 当前状态快照加 `autoCheck` 模式:状态、最近步骤、就绪时的 IDE url。页面 bootstrap 与 SSE 重连的基线。 |
 | `GET /api/events` | SSE:`state` 与 `step` 事件;连接时先回放缓冲的步骤日志,再流式推送实时事件(FR5、N2)。 |
-| `POST /api/provision` | 触发 reconcile→provision(幂等;若有进行中的开通则加入,而不是再起一个,FR7)。 |
+| `POST /api/provision` | reconcile,HEALTHY 则跳转、否则开通(幂等;若有进行中的开通则加入,而不是再起一个,FR7)。手动模式下由检查按钮驱动;自动模式的页面在 bootstrap 时自己 POST。 |
 | `POST /api/retry` | 重新 reconcile,然后重试失败的那一步(FR8)。 |
 
 状态机的迁移遵循 [0007](0007-per-user-ide-requirements.zh.md)。Portal 前后端分离:启动页是与后端分开构建的静态 SPA,一切状态跨界都是 JSON(`/api/state`、各 POST)或 SSE(`/api/events`),后端只静态托管构建产物、不持有页面逻辑。Portal 把状态迁移映射为 Jenkins 动作:
@@ -131,7 +131,7 @@ SSE 事件负载是只追加的 JSON 对象:
 
 步骤:`reconcile`、`lock`、`jenkins-queued`、`jenkins-running`、`image-pull`、`docker-run`、`start-hook`、`probe-internal`、`probe-proxy`、`ready`、`failed`。Portal 在内存中缓冲本轮步骤,并在 SSE (重)连时回放;Portal 重启后,按 marker 文件里记录的 build 重新挂上并继续跟踪,因此日志能存活(N3)。
 
-收到 `ready` 时浏览器用 `location.href` 跳转;页面同时常驻一个"进入我的 IDE"按钮,作为无 JS/弹窗被拦截时的兜底。热路径根本不打开 SSE 流——它就是一条裸 `302`(FR3)。
+收到 `ready` 时浏览器用 `location.href` 跳转;页面同时常驻一个"进入我的 IDE"按钮,作为无 JS/弹窗被拦截时的兜底。入口模式决定谁触发第一次探测:`autoCheck: true` 在 `GET /` 内 reconcile(HEALTHY 以一条裸 `302` 应答),冷路径页面自行启动本轮;`autoCheck: false` 让页面保持静默,直到检查按钮被按下。两种模式共用同一个页面、同一轮运行、同一条流(FR3、FR4)。
 
 ## 容器侧登录(O2)
 
@@ -151,6 +151,7 @@ jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, t
 # The auth-iam gate reads its own row; jwks_uri comes from its discovery document.
 iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
+autoCheck: false                       # entry reconciles on arrival when true (0007 FR4); shipped default is the manual check button
 ```
 
 token 不携带 group 或 email claim(0007"身份 claim"),所以这里刻意没有 `allowedGroups`。将来确需限制进入时,是闸门之后、开通之前,由 Portal 侧维护一份工号名单来核查。

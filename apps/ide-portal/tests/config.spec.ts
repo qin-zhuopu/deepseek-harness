@@ -33,6 +33,16 @@ describe('parsePortalConfig', () => {
     expect(config.iam.issuer).toBe('https://iam.test/idp')
     expect(config.uid.claim).toBe('sub')
     expect(config.port).toBe(0)
+    // The shipped default is manual: the check button drives the first probe.
+    expect(config.autoCheck).toBe(false)
+  })
+
+  it('reads autoCheck: true as the auto entry mode', () => {
+    expect(parsePortalConfig(`${VALID}\nautoCheck: true\n`).autoCheck).toBe(true)
+  })
+
+  it('refuses a non-boolean autoCheck', () => {
+    expect(() => parsePortalConfig(`${VALID}\nautoCheck: "yes"\n`)).toThrow(/autoCheck/)
   })
 
   it('refuses a missing section naming the key', () => {

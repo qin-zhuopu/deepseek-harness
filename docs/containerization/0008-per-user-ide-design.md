@@ -29,10 +29,10 @@ A small Node service deployed as one long-running container on 10.1.17.58 behind
 
 | Route | Behavior |
 |---|---|
-| `GET /` | No session cookie → the gate's `/login` redirect. Session → reconcile; HEALTHY → `302` to the user IDE; otherwise render the start page (FR3, FR4). |
-| `GET /api/state` | Current state snapshot: state, last steps, IDE url when ready. Page bootstrap and SSE-reconnect baseline. |
+| `GET /` | No session cookie → the gate's `/login` redirect. Session → `autoCheck: true` reconciles on arrival (HEALTHY → `302` to the user IDE; otherwise render the start page, which auto-starts the run); `autoCheck: false` (the shipped default) renders the start page and nothing probes Docker until the check button POSTs `/api/provision` (FR3, FR4). |
+| `GET /api/state` | Current state snapshot plus the `autoCheck` mode: state, last steps, IDE url when ready. Page bootstrap and SSE-reconnect baseline. |
 | `GET /api/events` | SSE: `state` and `step` events; replays the buffered step log on connect, then streams live (FR5, N2). |
-| `POST /api/provision` | Kick reconcile→provision (idempotent; joins an in-flight run instead of starting a second one, FR7). |
+| `POST /api/provision` | Reconcile, then navigate on HEALTHY or provision (idempotent; joins an in-flight run instead of starting a second one, FR7). The check button drives it in manual mode; the auto-mode page POSTs it on bootstrap. |
 | `POST /api/retry` | Re-reconcile, then retry the failed step (FR8). |
 
 State machine transitions follow [0007](0007-per-user-ide-requirements.md). The portal is front/back separated: the start page is a static SPA built separately from the backend, every state crossing is JSON (`/api/state`, the POSTs) or SSE (`/api/events`), and the backend serves the built SPA statically without holding page logic. The portal maps state transitions onto Jenkins actions:
@@ -131,7 +131,7 @@ SSE event payloads are append-only JSON objects:
 
 Steps: `reconcile`, `lock`, `jenkins-queued`, `jenkins-running`, `image-pull`, `docker-run`, `start-hook`, `probe-internal`, `probe-proxy`, `ready`, `failed`. The portal buffers the current run's steps in memory and replays them on SSE (re)connect; after a portal restart the Jenkins build named in the marker file is re-attached and tailed again, so the log survives (N3).
 
-When `ready` arrives the browser navigates via `location.href`; the page also shows a persistent "Open my IDE" button as the no-JS/popup-blocked fallback. The warm path never opens the SSE stream at all — it is the bare `302` (FR3).
+When `ready` arrives the browser navigates via `location.href`; the page also shows a persistent "Open my IDE" button as the no-JS/popup-blocked fallback. Entry mode decides who triggers the first probe: `autoCheck: true` reconciles inside `GET /` (HEALTHY answers with the bare `302`) and the cold page auto-starts its run; `autoCheck: false` keeps the page inert until the check button. Both modes share the page, the run, and the stream (FR3, FR4).
 
 ## Container-side login (O2)
 
@@ -151,6 +151,7 @@ jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, t
 # The auth-iam gate reads its own row; jwks_uri comes from its discovery document.
 iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
+autoCheck: false                       # entry reconciles on arrival when true (0007 FR4); shipped default is the manual check button
 ```
 
 The token carries no group or email claim (0007, Identity claims), so there is deliberately no `allowedGroups` here. If entry restriction is ever required it is a portal-maintained employee-number list checked after the gate, before provisioning.

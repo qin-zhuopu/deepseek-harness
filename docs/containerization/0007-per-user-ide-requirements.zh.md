@@ -6,7 +6,7 @@
 
 ## 目的与范围
 
-员工通过一个固定的入口 URL 访问个人 DSH Web IDE。企业 OIDC 登录完成后,入口把用户身份解析为每用户域名 `ide-<uid>.jereh-pe.cn`,若该用户的容器尚未运行则将其启动,并把启动与检查过程作为实时日志逐行显示在浏览器页面上,最终把浏览器临时重定向到该用户自己的 IDE。
+员工通过一个固定的入口 URL 访问个人 DSH Web IDE。企业 OIDC 登录完成后,入口把用户身份解析为每用户域名 `ide-<uid>.jereh-pe.cn`,并对该用户的服务做检查——自动入口模式下在进入时检查,手动模式下由用户在启动页点击检查——容器缺失则启动它,把启动与检查过程作为实时日志逐行显示在浏览器页面上,最终把浏览器交给该用户自己的 IDE。
 
 范围内:身份到域名的解析、按需容器开通、健康验证、实时进度上报、重定向。范围外:IDE 产品本身、镜像构建(归 [docs/ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md](../ops/2026-09-05-airgapped-dsh-aio-jenkins-build.zh.md) 的 Jenkins 流水线所有)、每用户数据备份。
 
@@ -42,8 +42,8 @@ token **不含 email,也不含 group claim**。因此任何"只允许部分员�
 
 - **FR1 身份**:Portal 通过 Jereh IAM 所支持的隐式流(C10)向 IdP 认证:`id_token` 由浏览器从重定向 fragment 中中转上来,Portal 对照已发布的 JWKS 验证签名、`iss`、`aud`、`exp` 之后才读取任何 claim。uid 取自已验签 token 的 `sub` claim,并与 `userId` 交叉核对——绝不取自用户可编辑的字段(O1)。
 - **FR2 域名派生**:从已验签的 uid 出发,Portal 精确派生 `ide-<uid>.jereh-pe.cn` 与容器名 `ide-<uid>`。由 uid 拼装任何名称、域名、卷名或命令之前,uid 必须先通过 `^[0-9]{1,8}$` 校验(见 SR1)。
-- **FR3 热路径**:若用户容器存在且通过健康检查,入口直接以 HTTP 重定向回应用户 IDE。无中间页,无日志流。
-- **FR4 冷路径**:若容器不存在,Portal 端到端完成开通:用 `docker run` 创建容器(按需求方决定,经 Jenkins 执行)、启动、健康验证,然后把用户 IDE 的 URL 交给浏览器。
+- **FR3 热路径**:服务检查回 HEALTHY 时——自动入口模式下由到达触发,手动模式下由启动页的检查按钮触发——Portal 把用户 IDE 的 url 交给浏览器,不跑任何开通步骤。
+- **FR4 冷路径**:检查发现容器不存在时,Portal 就从这同一个检查出发端到端完成开通:用 `docker run` 创建容器(按需求方决定,经 Jenkins 执行)、启动、健康验证,然后把用户 IDE 的 URL 交给浏览器。入口模式由 Portal 配置 `autoCheck` 决定([0008 配置](0008-per-user-ide-design.zh.md)):`true` 在进入时 reconcile,无需点击就触达 Docker(最初的入口流程);`false` 只渲染启动页,用户不点击就不产生任何 Jenkins 构建,也不触碰 Docker 状态。线上部署跑 `autoCheck: false`;切回自动只是配置变更,不是代码变更(需求方拍板,2026-09-06:两条路径都保留,先跑手动,验证无误后再切)。
 - **FR5 实时进度**:每一个检查与开通步骤——探测结果、Jenkins 受理、容器创建、镜像拉取、健康尝试、失败——都在发生后数秒内,以带时间戳的日志行出现在用户已经打开的 Portal 页面上。
 - **FR6 崩溃安全再入**:宿主机重启或容器半死之后,新的进入要先核对 Docker 真实状态(reconcile),再走回健康态的最短路径,包括对 10.1.17.58 的 PID1 冻结(C2)重新补发启动 hook。
 - **FR7 每用户单飞**:两个标签页或两台设备同时进入,只能产生一次开通动作;第二个观看者订阅同一份实时日志。
@@ -56,7 +56,7 @@ token **不含 email,也不含 group claim**。因此任何"只允许部分员�
 | # | 故事 | 验收 |
 |---|---|---|
 | US1 | 作为首次用户,登录后我看着 IDE 被逐步建起来,最后自动进入。 | 从创建到健康的每一步都有日志;两级健康检查都通过后才跳转;冷路径典型耗时 ≤ 5 分钟(镜像已预拉取)。 |
-| US2 | 作为回访用户,登录直接落到我的 IDE。 | 单次 302,无中间页;额外开销 < 1 秒,外加 IDE 自身加载。 |
+| US2 | 作为回访用户,登录就能进我的 IDE——自动模式全自动,手动模式点一下按钮。 | 自动模式:单次 302,无中间页。手动模式:启动页立即渲染;检查按钮触发的探测回 HEALTHY,页面随即跳转;不跑任何开通。 |
 | US3 | 作为宿主机重启后的用户,再次进入就能用。 | 停止或冻结的容器被识别、带 hook 启动、健康检查、跳转;页面显示"正在恢复"而非"出错"。 |
 | US4 | 作为开了两个标签页的用户,我永远不会触发两次开通。 | 同一用户同一时刻只有一个 Jenkins 任务;第二个标签页流入同一批事件。 |
 | US5 | 作为开通失败的用户,我能看到失败在哪、为什么。 | 失败步骤连同其错误和 Jenkins console 链接高亮显示;一键重试先重新 reconcile。 |
@@ -88,7 +88,7 @@ stateDiagram-v2
 
 ## 时序:冷启动
 
-热路径到状态探测就结束:回 HEALTHY,`GET /` 直接以那条 `302` 收尾,后面的开通段落一步都不跑。
+热路径到状态探测就结束:它回 HEALTHY,浏览器拿到 IDE url,后面的开通段落一步都不跑。自动入口模式下到达即触发探测,应答是 `GET /` 发出的一条 `302`;手动模式(线上默认)由检查按钮触发,页面随即跳转。下面的时序图按手动模式画;自动模式下探测在到达时即发,而非等点击。
 
 ```mermaid
 sequenceDiagram
@@ -110,9 +110,11 @@ sequenceDiagram
     P->>P: extract sub, cross-check userId, validate ^[0-9]{1,8}$
     P-->>B: session cookie, 302 back to /
     B->>P: GET / (authenticated)
+    P-->>B: start page (no probe, no provisioning until clicked)
+    B->>P: POST /api/provision (user clicks the check button)
     P->>J: status probe (docker state + health)
     J-->>P: NO_SERVICE
-    P-->>B: start page opens SSE stream
+    P-->>B: SSE stream carries the step log
     P->>J: trigger ide-provision (uid, action=create)
     Note over P,J: step events stream to the page from here on
     J->>H: docker run --name ide-<uid> --network dc_default -e VIRTUAL_HOST=... --env-file <one-shot 600 file with NR_API_KEY>
@@ -122,7 +124,7 @@ sequenceDiagram
     J->>C: probe 1: internal http://ide-<uid>:8080/ -> 200/302/401 (gate)
     J->>N: probe 2: proxy GET with Host ide-<uid>.jereh-pe.cn -> 200/302/401
     P-->>B: READY event with the IDE url
-    B->>C: browser navigates (warm path: the plain 302)
+    B->>C: browser navigates (warm path: the same button answers HEALTHY, no provisioning)
 ```
 
 ## 环境约束(已验证,非假设)

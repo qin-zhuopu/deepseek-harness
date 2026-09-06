@@ -171,12 +171,28 @@ export class Orchestrator {
   }
 
   /**
+   * Drive reconcile, reporting a failed probe (Jenkins unreachable, a build
+   * without a reconcile marker) as FAILED, so the button-triggered flow always
+   * lands on a rendered terminal state (FR8).
+   */
+  private async reconcileOrFail(uid: string): Promise<Reconcile | undefined> {
+    try {
+      return await this.reconcile(uid)
+    } catch (error) {
+      this.appendStep(uid, 'failed', 'fail', error instanceof Error ? error.message : String(error))
+      this.failTo(uid, 'FAILED')
+      return undefined
+    }
+  }
+
+  /**
    * Enter the portal for a uid: reconcile, take the shortest path (warm →
    * return healthy), or provision (FR3/FR4). Idempotent: an in-flight run is
    * joined, never duplicated (FR7).
    */
   async enter(uid: string): Promise<ServiceState> {
-    const reconcile = await this.reconcile(uid)
+    const reconcile = await this.reconcileOrFail(uid)
+    if (reconcile === undefined) return 'FAILED'
     if (reconcile.kind === 'healthy') return 'HEALTHY'
     const action = reconcile.kind === 'absent' ? 'create' : 'start'
     return await this.provision(uid, action)
@@ -318,7 +334,8 @@ export class Orchestrator {
 
   /** Re-run the failed action from reconciled state (FR8). */
   async retry(uid: string): Promise<ServiceState> {
-    const reconcile = await this.reconcile(uid)
+    const reconcile = await this.reconcileOrFail(uid)
+    if (reconcile === undefined) return 'FAILED'
     return await this.provision(uid, reconcile.kind === 'absent' ? 'create' : 'start')
   }
 

@@ -46,7 +46,7 @@ afterEach(async () => {
   if (open !== undefined) { await open.close(); open = undefined }
 })
 
-async function start(): Promise<Harness> {
+async function start(autoCheck = false): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'ide-portal-srv-'))
   const envFile = join(dir, '.env')
   await writeFile(envFile, 'NR_API_KEY=sk-test\n')
@@ -80,6 +80,7 @@ jenkins: {url: http://jenkins.invalid, job: ide-provision, user: portal, tokenEn
 iam: {issuer: ${issuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
 port: 0
+autoCheck: ${autoCheck ? 'true' : 'false'}
 `)
   const jenkins = new FakeJenkins()
   const orchestrator = new Orchestrator(config, jenkins, join(dir, 'state'), instantClock)
@@ -127,15 +128,51 @@ describe('guard', () => {
   })
 })
 
-describe('warm path (FR3)', () => {
-  it('GET / with a healthy service redirects to the IDE url', async () => {
+describe('entry runs no checks (manual mode, autoCheck: false)', () => {
+  it('GET / renders the start page without any Jenkins build, healthy container or not', async () => {
     const h = await start()
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    const response = await get(h, '/', undefined, 'text/html')
-    void response
+    const direct = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
+    expect(direct.status).toBe(200)
+    expect(await direct.text()).toContain('检查并开通我的 IDE')
+    expect(h.jenkins.triggered.length).toBe(0)
+    const snapshot = await (await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })).json() as StateSnapshot
+    expect(snapshot.state.state).toBe('NO_SERVICE')
+    expect(snapshot.autoCheck).toBe(false)
+  })
+})
+
+describe('entry reconciles on arrival (auto mode, autoCheck: true)', () => {
+  it('GET / with a healthy service redirects to the IDE url', async () => {
+    const h = await start(true)
+    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
     const direct = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' }, redirect: 'manual' })
     expect(direct.status).toBe(302)
     expect(direct.headers.get('location')).toBe('http://ide-14409.jereh-pe.cn/')
+  })
+
+  it('GET / on an absent container renders the start page and /api/state carries autoCheck', async () => {
+    const h = await start(true)
+    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
+    const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
+    expect(page.status).toBe(200)
+    // The auto page bootstraps the run itself, so the check button stays hidden.
+    expect(await page.text()).toContain('进入我的 IDE')
+    const snapshot = await (await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })).json() as StateSnapshot
+    expect(snapshot.autoCheck).toBe(true)
+  })
+})
+
+describe('warm path (FR3)', () => {
+  it('the check action on a healthy container yields READY-able state without provisioning', async () => {
+    const h = await start()
+    h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    const started = await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
+    expect(started.status).toBe(202)
+    const state = await pollState(h)
+    expect(state.state.state).toBe('HEALTHY')
+    expect(state.state.ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
+    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
   })
 })
 
@@ -156,10 +193,18 @@ describe('cold path page (FR4, FR5)', () => {
   })
 })
 
+/** The /api/state snapshot as the page consumes it. */
+interface StateSnapshot {
+  state: { state: string; ideUrl: string | undefined }
+  steps: { step: string }[]
+  autoCheck: boolean
+}
+
 /** Poll /api/state until the run reaches a terminal state (the detached POST drives it). */
-async function pollState(h: Harness, tries = 200): Promise<{ state: { state: string }; steps: { step: string }[] }> {
+async function pollState(h: Harness, tries = 200): Promise<StateSnapshot> {
   for (let attempt = 0; attempt < tries; attempt++) {
-    const snapshot = await (await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })).json() as { state: { state: string }; steps: { step: string }[] }
+    const response = await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })
+    const snapshot = await response.json() as StateSnapshot
     if (snapshot.state.state !== 'NO_SERVICE' && snapshot.state.state !== 'PROVISIONING' && snapshot.state.state !== 'STARTING') return snapshot
     await new Promise<void>((resolve) => { setTimeout(resolve, 5) })
   }

@@ -135,13 +135,17 @@ export function createPortalServer(
     }
 
     if (path === '/' && req.method === 'GET') {
-      // Reconcile only — fast. Warm answers with the redirect; anything else renders the
-      // page, which starts the run via /api/provision and watches it over SSE.
-      const reconcile = await orchestrator.reconcile(uid)
-      if (reconcile.kind === 'healthy') {
-        res.writeHead(302, { location: orchestrator.stateEvent(uid).ideUrl ?? '/' })
-        res.end()
-        return
+      // autoCheck: true reconciles on arrival — a healthy container answers
+      // the entry with the bare 302 (FR3) and the cold page starts its own
+      // run. autoCheck: false renders the shell; nothing probes Docker
+      // or provisions until the check button POSTs /api/provision (FR4).
+      if (config.autoCheck) {
+        const reconcile = await orchestrator.reconcile(uid)
+        if (reconcile.kind === 'healthy') {
+          res.writeHead(302, { location: orchestrator.stateEvent(uid).ideUrl ?? '/' })
+          res.end()
+          return
+        }
       }
       serveStatic('/', res)
       return
@@ -154,7 +158,9 @@ export function createPortalServer(
 
     if (path === '/api/state' && req.method === 'GET') {
       const run = orchestrator.run(uid)
-      json(res, 200, { state: orchestrator.stateEvent(uid), steps: run.steps })
+      // autoCheck tells the page whether the entry already reconciled and may
+      // auto-start (true) or the check button owns the first probe (false).
+      json(res, 200, { state: orchestrator.stateEvent(uid), steps: run.steps, autoCheck: config.autoCheck })
       return
     }
 

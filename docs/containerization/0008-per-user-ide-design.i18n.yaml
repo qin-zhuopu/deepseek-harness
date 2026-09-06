@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/containerization/0008-per-user-ide-design.md
-0008-per-user-ide-design.md: f093583221e4c2587ba84b8c5f3b5f2a0f7d4ef1
-0008-per-user-ide-design.zh.md: 98a5b9282b14942e646553a5da0e95044cdf5766
+0008-per-user-ide-design.md: 97f1309b9750f854ab2ad1e72cd636e390e1e8eb
+0008-per-user-ide-design.zh.md: a33f364979a73ca0196acf04037d1e667acfc29a

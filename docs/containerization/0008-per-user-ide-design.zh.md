@@ -29,10 +29,11 @@ flowchart LR
 
 | 路由 | 行为 |
 |---|---|
-| `GET /` | 无会话 cookie → 闸门的 `/login` 重定向。有会话 → 入口无条件在到达时 reconcile——只读探测,不改任何状态;两种结果都渲染启动页(健康时状态栏显示就绪并出现打开按钮,绝不发 `302`:跳转永远由用户的点击触发)。开通只发生在检查按钮的 `POST /api/provision` 之后(FR3、FR4;需求方拍板,2026-09-06)。 |
+| `GET /` | 无会话 cookie → 闸门的 `/login` 重定向。有会话 → 立即渲染启动页,到达检查在请求背后异步跑,检查链经 `/api/events` 流式推送(需求方拍板,2026-09-06:页面秒开,进度走 SSE);检查期间状态栏显示"正在检查",不用可能被推翻的旧结论。 |
 | `GET /api/state` | 当前状态快照:状态、最近步骤、就绪时的 IDE url。页面 bootstrap 与 SSE 重连的基线。 |
 | `GET /api/events` | SSE:`state` 与 `step` 事件;连接时先回放缓冲的步骤日志,再流式推送实时事件(FR5、N2)。 |
-| `POST /api/provision` | reconcile,HEALTHY 则跳转、否则开通(幂等;若有进行中的开通则加入,而不是再起一个,FR7)。手动模式下由检查按钮驱动;自动模式的页面在 bootstrap 时自己 POST。 |
+| `POST /api/check` | 重复到达检查,只读;"检查"按钮驱动,检查链走 SSE。 |
+| `POST /api/provision` | 开通,幂等(需求方拍板,2026-09-06):HEALTHY 短路、进行中的开通加入而非重起(FR7)、只有 absent/stopped 才真正 create/start;"开通"按钮驱动,覆盖失败重试。 |
 | `POST /api/retry` | 重新 reconcile,然后重试失败的那一步(FR8)。 |
 
 状态机的迁移遵循 [0007](0007-per-user-ide-requirements.zh.md)。Portal 前后端分离:启动页是与后端分开构建的静态 SPA,一切状态跨界都是 JSON(`/api/state`、各 POST)或 SSE(`/api/events`),后端只静态托管构建产物、不持有页面逻辑。Portal 把状态迁移映射为 Jenkins 动作:
@@ -133,7 +134,7 @@ SSE 事件负载是只追加的 JSON 对象:
 
 步骤:`reconcile`、`lock`、`jenkins-queued`、`jenkins-running`、`image-pull`、`docker-run`、`start-hook`、`probe-internal`、`probe-proxy`、`ready`、`failed`。Portal 在内存中缓冲本轮步骤,并在 SSE (重)连时回放;Portal 重启后,按 marker 文件里记录的 build 重新挂上并继续跟踪,因此日志能存活(N3)。
 
-入口探测是唯一自动发生的动作(只读;需求方拍板,2026-09-06:只读操作无需点击)。就绪状态停在状态栏上——浏览器绝不自行跳转;常驻的"打开我的 IDE"按钮承载跳转,检查按钮承载开通。
+入口探测是唯一自动发生的动作(只读;需求方拍板,2026-09-06:只读操作无需点击)。"检查"与"开通"是两个按钮(需求方拍板,2026-09-06):检查重复只读探测,开通幂等(create/start/重试收敛为一次动作);每次检查渲染为一条链——工号、域名、服务状态、Compose 位置、健康检查、结论,detail 为中文可读文案,新链开始即替换旧链。就绪状态停在状态栏上——浏览器绝不自行跳转;常驻的"进入我的 IDE"按钮承载跳转。
 
 ## 容器侧登录(O2)
 

@@ -173,9 +173,21 @@ export function createPortalServer(
       return
     }
 
-    if ((path === '/api/provision' || path === '/api/retry') && req.method === 'POST') {
+    if (path === '/api/check' && req.method === 'POST') {
       await readBody(req)
-      void (path === '/api/retry' ? orchestrator.retry(uid) : orchestrator.enter(uid))
+      // The explicit re-check is the same read-only arrival probe; its chain
+      // streams over /api/events.
+      void orchestrator.arrive(uid)
+      json(res, 202, orchestrator.stateEvent(uid))
+      return
+    }
+
+    if (path === '/api/provision' && req.method === 'POST') {
+      await readBody(req)
+      // 开通 is idempotent (requester, 2026-09-06): a healthy service
+      // short-circuits, an in-flight run is joined, and only absent/stopped
+      // containers trigger create/start.
+      void orchestrator.enter(uid)
       json(res, 202, orchestrator.stateEvent(uid))
       return
     }

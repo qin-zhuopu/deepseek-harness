@@ -387,14 +387,13 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
     // The check reads as the requested chain: identity, domain, host facts, verdict.
     const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
-    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '检查结论', '结论'].includes(step.step))
+    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '结论'].includes(step.step))
     expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
       '工号: 14409',
       '域名: http://ide-14409.jereh-pe.cn/',
-      '服务状态: docker: running',
-      'Compose 位置: 非 compose 管理(docker run,由 provision.sh 创建)',
-      '健康检查: HTTP 302 from container',
-      '检查结论: healthy',
+      '服务状态: 容器运行中',
+      'Compose 位置: 独立容器(由开通脚本创建,非 compose 项目)',
+      '健康检查: 容器应答 HTTP 302(登录保护正常)',
       '结论: 专属IDE状态正常',
     ])
   }, 30_000)
@@ -409,14 +408,13 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
     // The check reads as the requested chain: identity, domain, host facts, verdict.
     const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
-    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '检查结论', '结论'].includes(step.step))
+    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '结论'].includes(step.step))
     expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
       '工号: 14409',
       '域名: http://ide-14409.jereh-pe.cn/',
-      '服务状态: docker: running',
-      'Compose 位置: 非 compose 管理(docker run,由 provision.sh 创建)',
-      '健康检查: HTTP 302 from container',
-      '检查结论: healthy',
+      '服务状态: 容器运行中',
+      'Compose 位置: 独立容器(由开通脚本创建,非 compose 项目)',
+      '健康检查: 容器应答 HTTP 302(登录保护正常)',
       '结论: 专属IDE状态正常',
     ])
   }, 30_000)

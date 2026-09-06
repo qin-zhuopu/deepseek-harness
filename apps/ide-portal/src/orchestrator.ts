@@ -49,7 +49,49 @@ export function resolveUid(config: PortalConfig, claims: Record<string, unknown>
 }
 
 /** Display labels for the probe's host-fact markers (requester chain, 2026-09-06). */
-const CHECK_LABELS: Record<string, string> = { service: '服务状态', compose: 'Compose 位置', health: '健康检查', reconcile: '检查结论' }
+const CHECK_LABELS: Record<string, string> = { service: '服务状态', compose: 'Compose 位置', health: '健康检查' }
+
+/** Docker states provision.sh reports through the `service` marker, in Chinese. */
+const DOCKER_STATES: Record<string, string> = {
+  running: '容器运行中',
+  absent: '容器不存在(尚未开通)',
+  exited: '容器已停止',
+  created: '容器已创建但未启动',
+  dead: '容器已死亡(dead)',
+  frozen: '容器冻结(frozen)',
+}
+
+/** Translate one probe marker's raw detail into page Chinese (the log is for operators in China). */
+function humanizeDetail(step: string, detail: string): string {
+  if (step === 'service') return DOCKER_STATES[detail.replace(/^docker:\s*/, '')] ?? `容器状态:${detail}`
+  if (step === 'compose') {
+    if (detail.startsWith('非 compose')) return '独立容器(由开通脚本创建,非 compose 项目)'
+    const match = /^(.+?)(?::(\d+))?\s+service=(.+)$/.exec(detail)
+    if (match !== null) return `compose 配置 ${match[1] ?? ''}${match[2] !== undefined ? ` 第${match[2]}行` : ''},服务名 ${match[3] ?? ''}`
+    return detail
+  }
+  if (step === 'health') {
+    const http = /^HTTP (\d+) from container$/.exec(detail)
+    if (http !== null) {
+      const code = http[1] ?? ''
+      const gate = code === '401' || code === '302' ? '(登录保护正常)' : ''
+      return `容器应答 HTTP ${code}${gate}`
+    }
+    const none = /^no answer \(last (\d+)\)$/.exec(detail)
+    if (none !== null) return `容器无应答(最后一次 HTTP ${none[1] ?? ''})`
+    return detail
+  }
+  return detail
+}
+
+/** The final verdict line for a reconcile result, in Chinese. */
+function verdictDetail(reconcile: Reconcile): string {
+  switch (reconcile.kind) {
+    case 'healthy': return '专属IDE状态正常'
+    case 'absent': return '未开通——点击「开通」创建你的 IDE'
+    case 'exists': return reconcile.running ? '容器在运行,但健康检查未通过' : '容器存在但未运行——点击「开通」重新启动'
+  }
+}
 
 /** The reconcile verdict the probe job reports via its `reconcile` marker detail. */
 function reconcileFromDetail(detail: string): Reconcile {
@@ -197,9 +239,11 @@ export class Orchestrator {
     this.appendStep(uid, '域名', 'info', ideUrl(this.config, uid))
     for (const marker of markers) {
       const label = CHECK_LABELS[marker.step]
-      if (label !== undefined) this.appendStep(uid, label, marker.status, marker.detail)
+      if (label !== undefined) this.appendStep(uid, label, marker.status, humanizeDetail(marker.step, marker.detail))
     }
-    if (reconcile.kind === 'healthy') this.appendStep(uid, '结论', 'info', '专属IDE状态正常')
+    // Absent and healthy are legitimate verdicts (info); a container that
+    // exists but fails its health probe is the only red conclusion.
+    this.appendStep(uid, '结论', reconcile.kind === 'exists' ? 'fail' : 'info', verdictDetail(reconcile))
     this.emit(uid, this.stateEvent(uid))
     return reconcile
   }

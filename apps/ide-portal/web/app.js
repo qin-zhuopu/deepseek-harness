@@ -1,24 +1,26 @@
 /* The start page is a projection of the server state (0007: 服务端状态权威):
    it renders exactly what /api/state + /api/events carry and holds no
    business logic of its own. The entry auto-checks on arrival (a read-only
-   reconcile); provisioning is the user's click on the check button, and the
-   jump to the IDE is the user's click on the open button (requester
-   decision, 2026-09-06). */
+   reconcile). 检查 and 开通 are two separate actions (requester decision,
+   2026-09-06): 检查 re-runs the read-only probe; 开通 is idempotent —
+   healthy short-circuits, an in-flight run is joined, and only an absent or
+   stopped container triggers create/start. The jump to the IDE stays with
+   the user's click on the open button. */
 'use strict'
 
 const statusEl = document.getElementById('status')
 const logEl = document.getElementById('log')
 const checkBtn = document.getElementById('check')
+const provisionBtn = document.getElementById('provision')
 const openBtn = document.getElementById('open')
-const retryBtn = document.getElementById('retry')
 
 const LABELS = {
   PROVISIONING: '正在创建你的 IDE 容器…',
   STARTING: '正在启动容器并通过健康检查…',
-  HEALTHY: '服务已就绪,点击“打开我的 IDE”进入。',
-  READY: '服务已就绪!点击“打开我的 IDE”进入。',
-  FAILED: '开通失败,见下方日志。',
-  TIMEOUT: '健康检查超时,可重试。',
+  HEALTHY: '服务已就绪,点击“进入我的 IDE”。',
+  READY: '服务已就绪!点击“进入我的 IDE”。',
+  FAILED: '开通失败,见下方日志;可再次点击“开通”重试。',
+  TIMEOUT: '健康检查超时;可再次点击“开通”重试。',
   IDLE: '服务处于闲置状态,正在唤醒…',
   UNHEALTHY: '服务异常,正在自动恢复…',
 }
@@ -29,25 +31,33 @@ let seenSeq = 0
 const logTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
 function renderState(event) {
-  // While the arrival check runs, the snapshot may be stale (e.g. READY from
-  // a previous visit): show 检查中 instead of a banner the probe may overturn.
+  const state = event.state
+  const busy = event.checking || state === 'PROVISIONING' || state === 'STARTING'
   if (event.checking) {
     statusEl.textContent = '正在检查服务状态…'
     statusEl.className = 'state checking'
   } else {
-    statusEl.textContent = event.state === 'NO_SERVICE' ? '未发现运行中的 IDE,点击“检查并开通”创建。' : (LABELS[event.state] ?? event.state)
-    statusEl.className = 'state ' + event.state.toLowerCase()
+    statusEl.textContent = state === 'NO_SERVICE' ? '尚未开通:点击“开通”创建你的 IDE。' : (LABELS[state] ?? state)
+    statusEl.className = 'state ' + state.toLowerCase()
   }
   if (event.ideUrl) openBtn.href = event.ideUrl
-  const settled = !event.checking
-  openBtn.hidden = !(settled && event.ideUrl && (event.state === 'READY' || event.state === 'HEALTHY'))
-  checkBtn.hidden = !(settled && event.state === 'NO_SERVICE')
-  if (settled && event.state !== 'NO_SERVICE') checkBtn.disabled = false
-  retryBtn.hidden = !(settled && (event.state === 'FAILED' || event.state === 'TIMEOUT'))
+  openBtn.hidden = !(event.ideUrl && (state === 'READY' || state === 'HEALTHY'))
+  // 检查 stays available except while a probe or a run is in flight.
+  checkBtn.hidden = busy
+  checkBtn.disabled = Boolean(event.checking)
+  // 开通 covers create, start, and retry; hidden once the service is usable.
+  const needProvision = state === 'NO_SERVICE' || state === 'FAILED' || state === 'TIMEOUT' || state === 'UNHEALTHY' || state === 'IDLE'
+  provisionBtn.hidden = !(needProvision || state === 'PROVISIONING' || state === 'STARTING')
+  provisionBtn.disabled = state === 'PROVISIONING' || state === 'STARTING'
+  provisionBtn.textContent = state === 'PROVISIONING' ? '开通中…' : (state === 'STARTING' ? '启动中…' : '开通')
 }
 
 function renderStep(step) {
   if (step.seq <= seenSeq) return
+  // 工号 opens every check chain: a second one means the server started a
+  // new check (the per-check step-log reset) — drop the previous chain so
+  // only the current one shows.
+  if (step.step === '工号' && logEl.childElementCount > 0) logEl.textContent = ''
   seenSeq = step.seq
   const time = logTime.format(new Date(step.atMs))
   const line = document.createElement('div')
@@ -69,25 +79,22 @@ function connect() {
   source.onerror = () => { /* EventSource reconnects on its own; the server replays on (re)connect. */ }
 }
 
-// The one action that reaches Jenkins: the user's own check button (FR3/FR4).
-// A healthy answer lands as READY on the stream and reveals the open button;
-// an absent or stopped service continues into provisioning under the same
-// request.
+// 检查 re-runs the read-only arrival probe; the chain streams over SSE.
 checkBtn.addEventListener('click', async () => {
   checkBtn.disabled = true
   statusEl.textContent = '正在检查服务状态…'
+  await fetch('/api/check', { method: 'POST', credentials: 'same-origin' })
+})
+// 开通 is idempotent on the server; a second click while it runs joins the
+// in-flight run instead of starting a duplicate.
+provisionBtn.addEventListener('click', async () => {
+  provisionBtn.disabled = true
   await fetch('/api/provision', { method: 'POST', credentials: 'same-origin' })
 })
 openBtn.addEventListener('click', () => { window.location.assign(openBtn.href) })
-retryBtn.addEventListener('click', async () => {
-  retryBtn.disabled = true
-  await fetch('/api/retry', { method: 'POST', credentials: 'same-origin' })
-  retryBtn.disabled = false
-})
 
-// Bootstrap from the authoritative snapshot (the entry already auto-checked:
-// the state here is fresh and read-only), then stream (FR5, FR7 joiner view).
-// Provisioning never starts on its own — the check button owns that click.
+// Bootstrap from the authoritative snapshot, then stream (FR5, FR7 joiner
+// view). The arrival check may still be in flight: its chain follows on SSE.
 fetch('/api/state', { credentials: 'same-origin' })
   .then(async (response) => {
     const snapshot = await response.json()

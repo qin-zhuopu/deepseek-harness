@@ -296,6 +296,19 @@ async function pollState(base: string, token: string, until: string, tries = 400
   throw new Error(`state never reached ${until}; last: ${JSON.stringify(last)}${jk}${err}`)
 }
 
+/** Poll /api/state until a step with the given name lands (detached writes settle). */
+async function pollSteps(base: string, token: string, step: string, stack?: Stack): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const res = await fetch(`${base}/api/state`, { headers: { cookie: `dsh_token=${token}` } })
+    const last = JSON.parse(await res.text()) as Record<string, unknown>
+    const steps = (last['steps'] ?? []) as { step: string }[]
+    if (steps.some(entry => entry.step === step)) return last
+    await new Promise<void>((resolve) => { setTimeout(resolve, 25) })
+  }
+  const jk = stack === undefined ? '' : `; jenkins: ${JSON.stringify(stack.jenkinsHits.slice(0, 40))}`
+  throw new Error(`step ${step} never landed${jk}`)
+}
+
 /** Read the SSE stream until a JSON fragment appears (or the budget runs out). */
 async function readStream(base: string, token: string, marker: string, ms = 8000): Promise<string> {
   const controller = new AbortController()
@@ -345,7 +358,7 @@ describe('portal end-to-end (real process, real sockets)', () => {
     expect(stack.iamHits).toEqual(['/idp/.well-known/openid-configuration', '/idp/oidc/getPublicKey'])
   }, 30_000)
 
-  it('drives the manual check button through fake Jenkins to READY, markers and SSE included', async () => {
+  it('drives the 启动 button through fake Jenkins to READY in one build, business steps and SSE included', async () => {
     stack = await startStack()
     const token = await signIn(stack)
 
@@ -354,19 +367,22 @@ describe('portal end-to-end (real process, real sockets)', () => {
 
     const final = await pollState(stack.portalBase, token, 'READY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
+    // Exactly ONE build: 启动 converges without a preceding probe.
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
     const steps = (final['steps'] ?? []) as { step: string; status: string }[]
-    expect(steps.some(step => step.step === 'jenkins-queued' && step.status === 'ok')).toBe(true)
-    expect(steps.some(step => step.step === 'image-pull' && step.status === 'ok')).toBe(true)
+    expect(steps.some(step => step.step === '排队' && step.status === 'info')).toBe(true)
+    expect(steps.some(step => step.step === '部署' && step.status === 'ok')).toBe(true)
+    expect(steps.some(step => step.step === '就绪' && step.status === 'ok')).toBe(true)
     expect(stack.jenkinsHits).toContain('POST /job/ide-provision/buildWithParameters')
     expect(stack.jenkinsHits.some(hit => hit.startsWith('GET /job/ide-provision/') && hit.endsWith('/logText/progressiveText'))).toBe(true)
 
     // The SSE stream replays the finished run and lands on READY with the url.
     const sse = await readStream(stack.portalBase, token, '"state":"READY"')
-    expect(sse).toContain('"step":"ready"')
+    expect(sse).toContain('"step":"就绪"')
     expect(sse).toContain('"ideUrl":"http://ide-14409.jereh-pe.cn/"')
   }, 30_000)
 
-  it('starts a stopped container: reconcile picks start, never create', async () => {
+  it('a stopped container converges in one create build: the log names the skipped deploy', async () => {
     stack = await startStack({ probe: 'stopped' })
     const token = await signIn(stack)
     const accepted = await fetch(`${stack.portalBase}/api/provision`, { method: 'POST', headers: { cookie: `dsh_token=${token}` } })
@@ -374,28 +390,23 @@ describe('portal end-to-end (real process, real sockets)', () => {
     const final = await pollState(stack.portalBase, token, 'READY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
     const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
-    expect(steps.some(step => step.step === 'lock' && step.detail.includes('action=start'))).toBe(true)
+    expect(steps.some(step => step.step === '部署')).toBe(true)
+    expect(steps.some(step => step.step === '就绪')).toBe(true)
   }, 30_000)
 
-  it('short-circuits a healthy container: exactly the probe runs, the entry still answers READY', async () => {
+  it('starting an already-running IDE builds nothing: the hint lands in the log', async () => {
     stack = await startStack({ probe: 'healthy' })
     const token = await signIn(stack)
+    // Arrival check establishes HEALTHY first.
+    const page = await fetch(`${stack.portalBase}/`, { headers: { cookie: `dsh_token=${token}`, accept: 'text/html' } })
+    expect(page.status).toBe(200)
+    await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
+    const before = stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters').length
     const accepted = await fetch(`${stack.portalBase}/api/provision`, { method: 'POST', headers: { cookie: `dsh_token=${token}` } })
     expect(accepted.status).toBe(202)
-    const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
+    const final = await pollSteps(stack.portalBase, token, '提示', stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
-    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
-    // The check reads as the requested chain: identity, domain, host facts, verdict.
-    const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
-    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '结论'].includes(step.step))
-    expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
-      '工号: 14409',
-      '域名: http://ide-14409.jereh-pe.cn/',
-      '服务状态: 容器运行中',
-      'Compose 位置: 独立容器(由开通脚本创建,非 compose 项目)',
-      '健康检查: 容器应答 HTTP 302(登录保护正常)',
-      '结论: 专属IDE状态正常',
-    ])
+    expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(before)
   }, 30_000)
 
   it('the entry auto-checks on arrival: a healthy container renders the page on HEALTHY without provisioning', async () => {
@@ -406,17 +417,6 @@ describe('portal end-to-end (real process, real sockets)', () => {
     const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
-    // The check reads as the requested chain: identity, domain, host facts, verdict.
-    const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
-    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '结论'].includes(step.step))
-    expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
-      '工号: 14409',
-      '域名: http://ide-14409.jereh-pe.cn/',
-      '服务状态: 容器运行中',
-      'Compose 位置: 独立容器(由开通脚本创建,非 compose 项目)',
-      '健康检查: 容器应答 HTTP 302(登录保护正常)',
-      '结论: 专属IDE状态正常',
-    ])
   }, 30_000)
 
   it('attaches to the marker-named build after a portal restart and drives it to READY', async () => {

@@ -187,10 +187,10 @@ export function createPortalServer(
 
     if (path === '/api/provision' && req.method === 'POST') {
       await readBody(req)
-      // 开通 is idempotent (requester, 2026-09-06): a healthy service
-      // short-circuits, an in-flight run is joined, and only absent/stopped
-      // containers trigger create/start.
-      void orchestrator.enter(uid)
+      // 启动 converges in one idempotent build (requester, 2026-09-06): no
+      // preceding probe; a service the latest check found running logs
+      // 无需启动 instead of a build.
+      void orchestrator.start(uid)
       json(res, 202, orchestrator.stateEvent(uid))
       return
     }

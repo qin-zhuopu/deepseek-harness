@@ -69,15 +69,16 @@ const COLD = `[DSH_STEP] 2 image-pull ok pulled dev-amd64-abc1234
 `
 
 describe('cold path (FR4, US1)', () => {
-  it('drives absent -> READY translating markers into steps and states', async () => {
+  it('start() converges absent -> READY in ONE build with business-language steps', async () => {
     const { orchestrator, jenkins, events } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     jenkins.script('create', { console: COLD, result: 'SUCCESS' })
-    const state = await orchestrator.enter('14409')
+    const state = await orchestrator.start('14409')
     expect(state).toBe('READY')
+    // No preceding probe build: 启动 goes straight to the idempotent create.
+    expect(jenkins.triggered.map(t => t.action)).toEqual(['create'])
     expect(orchestrator.run('14409').steps.map(s => s.step)).toEqual([
-      '工号', '域名', '检查', 'jenkins-running', '结论', 'lock', 'jenkins-queued', 'jenkins-running',
-      'image-pull', 'docker-run', 'start-hook', 'probe-internal', 'probe-proxy', 'ready',
+      '开始启动', '排队', '启动中',
+      '准备运行环境', '部署', '启动服务', '启动后自检', '外部访问检查', '就绪',
     ])
     const create = jenkins.triggered.find(t => t.action === 'create')
     expect(create?.imageTag).toBe('dev-amd64-abc1234')
@@ -89,11 +90,16 @@ describe('cold path (FR4, US1)', () => {
 
   it('a stopped container starts without any key transport (FR10, SR5)', async () => {
     const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info stopped\n', result: 'SUCCESS' })
-    jenkins.script('start', { console: '[DSH_STEP] 2 start-hook ok fired\n[DSH_STEP] 3 probe-internal ok 200\n[DSH_STEP] 4 probe-proxy ok 200\n[DSH_STEP] 5 ready ok done\n', result: 'SUCCESS' })
-    expect(await orchestrator.enter('14409')).toBe('READY')
-    const start = jenkins.triggered.find(t => t.action === 'start')
-    expect(start?.imageTag).toBe('dev-amd64-abc1234')
+    // A stopped container reads as already deployed: the create build skips
+    // creation and starts it (host-side idempotence).
+    jenkins.script('create', {
+      console: '[DSH_STEP] 2 docker-run info ide-14409 already exists (exited); continuing as start\n[DSH_STEP] 4 start-hook ok fired\n[DSH_STEP] 5 ready ok done\n',
+      result: 'SUCCESS',
+    })
+    expect(await orchestrator.start('14409')).toBe('READY')
+    expect(jenkins.triggered.map(t => t.action)).toEqual(['create'])
+    const skipped = orchestrator.run('14409').steps.find(s => s.detail.includes('此前已部署'))
+    expect(skipped?.step).toBe('部署')
   })
 })
 
@@ -130,18 +136,17 @@ describe('warm path (FR3)', () => {
   it('reconcile finding a healthy container returns HEALTHY without provisioning', async () => {
     const { orchestrator, jenkins } = await harness()
     jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
-    expect(await orchestrator.enter('14409')).toBe('HEALTHY')
+    expect(await orchestrator.reconcile('14409').then(() => 'HEALTHY')).toBe('HEALTHY')
     expect(jenkins.triggered.map(t => t.action)).toEqual(['probe'])
   })
 })
 
 describe('single flight (FR7)', () => {
-  it('a second enter joins the in-flight run instead of triggering a second create', async () => {
+  it('a second start joins the in-flight run instead of triggering a second create', async () => {
     const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     jenkins.script('create', { console: COLD, result: 'SUCCESS' })
-    const first = orchestrator.enter('14409')
-    const second = orchestrator.enter('14409')
+    const first = orchestrator.start('14409')
+    const second = orchestrator.start('14409')
     expect(await first).toBe('READY')
     expect(await second).toBe('READY')
     expect(jenkins.triggered.filter(t => t.action === 'create').length).toBeLessThanOrEqual(1)
@@ -151,28 +156,25 @@ describe('single flight (FR7)', () => {
 describe('failure terminals (FR8, FR6)', () => {
   it('a failed marker ends the run FAILED with the failed step named', async () => {
     const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n[DSH_STEP] 3 probe-internal fail never answered 200\n', result: 'FAILURE' })
-    expect(await orchestrator.enter('14409')).toBe('FAILED')
+    expect(await orchestrator.start('14409')).toBe('FAILED')
     expect(orchestrator.run('14409').snapshot.failedStep).toBe('probe-internal')
   })
 
   it('a silent healthy-less run ends TIMEOUT past the budget', async () => {
     const { orchestrator, jenkins } = await harness(crawlingClock())
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info running-unhealthy\n', result: 'SUCCESS' })
-    jenkins.script('start', { console: '[DSH_STEP] 2 start-hook ok fired\n', result: undefined })
-    expect(await orchestrator.enter('14409')).toBe('TIMEOUT')
+    jenkins.script('create', { console: '[DSH_STEP] 2 start-hook ok fired\n', result: undefined })
+    expect(await orchestrator.start('14409')).toBe('TIMEOUT')
   })
 
-  it('retry re-reconciles and re-provisions', async () => {
+  it('starting an already-running IDE is a no-op: no build, a hint in the log', async () => {
     const { orchestrator, jenkins } = await harness()
-    jenkins.script('probe',
-      { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' },
-      { console: '[DSH_STEP] 1 reconcile info stopped\n', result: 'SUCCESS' })
-    jenkins.script('create', { console: '[DSH_STEP] 2 docker-run fail name conflict handled\n', result: 'FAILURE' })
-    jenkins.script('start', { console: COLD.replace('absent', 'stopped'), result: 'SUCCESS' })
-    expect(await orchestrator.enter('14409')).toBe('FAILED')
-    expect(await orchestrator.retry('14409')).toBe('READY')
+    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    await orchestrator.reconcile('14409')
+    const builds = jenkins.triggered.length
+    expect(await orchestrator.start('14409')).toBe('HEALTHY')
+    expect(jenkins.triggered.length).toBe(builds)
+    expect(orchestrator.run('14409').steps.at(-1)?.step).toBe('提示')
   })
 })
 
@@ -180,14 +182,13 @@ describe('restart attach (N3)', () => {
   it('resume re-attaches to the build the marker file names and finishes the run', async () => {
     const { orchestrator, jenkins, config, stateDir } = await harness(crawlingClock())
     // The create build stays unfinished (result undefined) while the first portal is alive; the crawling clock drives it to TIMEOUT.
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n', result: undefined })
-    const state = await orchestrator.enter('14409')
+    const state = await orchestrator.start('14409')
     expect(state).toBe('TIMEOUT')
     // A fresh orchestrator over the same state dir reads the marker and drives the still-running build to its end.
     const second = new FakeJenkins()
-    // Deterministic numbering: probe took build 100, create took 101; the marker names 101, still building.
-    second.seed(101, { console: '[DSH_STEP] 3 ready ok done\n', result: undefined })
+    // Deterministic numbering: create took build 100; the marker names 100, still building.
+    second.seed(100, { console: '[DSH_STEP] 3 ready ok done\n', result: undefined })
     const restarted = new Orchestrator({ ...config, health: { ...config.health, timeoutSec: 120 } }, second, stateDir, instantClock)
     await restarted.resume('14409')
     expect(restarted.run('14409').snapshot.state).toBe('READY')
@@ -202,9 +203,8 @@ describe('restart attach (N3)', () => {
 
   it('resumable lists exactly the uids a marker file names', async () => {
     const { orchestrator, jenkins, config, stateDir } = await harness(crawlingClock())
-    jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info absent\n', result: 'SUCCESS' })
     jenkins.script('create', { console: '[DSH_STEP] 2 docker-run ok created\n', result: undefined })
-    await orchestrator.enter('14409')
+    await orchestrator.start('14409')
     const restarted = new Orchestrator(config, new FakeJenkins(), stateDir, instantClock)
     expect(restarted.resumable()).toEqual(['14409'])
   })

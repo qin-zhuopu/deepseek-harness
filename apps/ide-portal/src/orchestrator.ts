@@ -257,36 +257,26 @@ export class Orchestrator {
   }
 
   /**
-   * Drive reconcile, reporting a failed probe (Jenkins unreachable, a build
-   * without a reconcile marker) as FAILED, so the button-triggered flow always
-   * lands on a rendered terminal state (FR8).
+   * 启动我的IDE (requester decision, 2026-09-06): converge to a running IDE
+   * in ONE idempotent build — no preceding probe build. The create action on
+   * the host is idempotent (absent → create, exists → start-and-probe), so
+   * deploy-if-needed, start-if-needed, and retry converge here; an IDE the
+   * latest check found running logs 无需启动 instead of a build.
    */
-  private async reconcileOrFail(uid: string): Promise<Reconcile | undefined> {
-    try {
-      return await this.reconcile(uid)
-    } catch (error) {
-      this.appendStep(uid, 'failed', 'fail', error instanceof Error ? error.message : String(error))
-      this.failTo(uid, 'FAILED')
-      return undefined
+  async start(uid: string): Promise<ServiceState> {
+    const state = this.run(uid).snapshot.state
+    if (state === 'HEALTHY' || state === 'READY') {
+      this.appendStep(uid, '提示', 'info', 'IDE 已在运行,无需启动。')
+      return state
     }
-  }
-
-  /**
-   * Enter the portal for a uid: reconcile, take the shortest path (warm →
-   * return healthy), or provision (FR3/FR4). Idempotent: an in-flight run is
-   * joined, never duplicated (FR7).
-   */
-  async enter(uid: string): Promise<ServiceState> {
-    const reconcile = await this.reconcileOrFail(uid)
-    if (reconcile === undefined) return 'FAILED'
-    if (reconcile.kind === 'healthy') return 'HEALTHY'
-    const action = reconcile.kind === 'absent' ? 'create' : 'start'
-    return await this.provision(uid, action)
+    return await this.provision(uid, 'create')
   }
 
   /**
    * Drive one create/start run to READY, FAILED, or TIMEOUT under the
-   * per-uid single-flight lock (FR7).
+   * per-uid single-flight lock (FR7). Steps render in business language
+   * (requester decision, 2026-09-06): 开始启动/部署/启动服务/启动后自检/
+   * 外部访问检查/就绪; the state machine still consumes the raw marker names.
    */
   async provision(uid: string, action: 'create' | 'start'): Promise<ServiceState> {
     if (this.busy.has(uid)) {
@@ -295,14 +285,14 @@ export class Orchestrator {
     }
     this.busy.add(uid)
     try {
-      this.appendStep(uid, 'lock', 'ok', `action=${action}`)
+      this.appendStep(uid, '开始启动', 'info', '准备部署并启动你的 IDE…')
       this.setState(uid, action === 'create' ? 'PROVISIONING' : 'STARTING', { failedStep: undefined })
       const build = await this.trigger(uid, action)
-      this.appendStep(uid, 'jenkins-queued', 'ok', `build pending #${String(build)}`)
+      this.appendStep(uid, '排队', 'info', `启动任务已提交,等待执行…(构建 #${String(build)})`)
       const state = await this.drive(uid, build)
       return state
     } catch (error) {
-      this.appendStep(uid, 'failed', 'fail', error instanceof Error ? error.message : String(error))
+      this.appendStep(uid, '启动失败', 'fail', error instanceof Error ? error.message : String(error))
       this.failTo(uid, 'FAILED')
       return 'FAILED'
     } finally {
@@ -355,9 +345,49 @@ export class Orchestrator {
     return all
   }
 
+  /**
+   * The business-language rendering of one run marker (requester decision,
+   * 2026-09-06): normal users read 部署/启动服务/启动后自检 — not
+   * docker-run/probe-internal. Status passes through; failures stay failures.
+   */
+  private businessStep(marker: { step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }): {
+    step: string
+    status: 'ok' | 'fail' | 'info'
+    detail: string
+  } {
+    const code = /HTTP (\d+)/.exec(marker.detail)?.[1]
+    switch (marker.step) {
+      case 'image-pull':
+        return marker.detail.includes('already')
+          ? { step: '准备运行环境', status: 'info', detail: '运行环境已就绪,无需重新准备' }
+          : { step: '准备运行环境', status: 'info', detail: '正在准备运行环境…' }
+      case 'docker-run':
+        if (marker.detail.includes('already exists')) return { step: '部署', status: 'info', detail: '此前已部署,跳过创建' }
+        return marker.status === 'ok'
+          ? { step: '部署', status: 'ok', detail: 'IDE 容器创建完成' }
+          : { step: '部署', status: marker.status, detail: marker.detail }
+      case 'start-hook':
+        return marker.status === 'ok'
+          ? { step: '启动服务', status: 'ok', detail: '服务已启动' }
+          : { step: '启动服务', status: 'info', detail: '首次无响应,正在重试启动…' }
+      case 'probe-internal':
+        return marker.status === 'ok'
+          ? { step: '启动后自检', status: 'ok', detail: `通过(HTTP ${code ?? '200'})` }
+          : { step: '启动后自检', status: 'fail', detail: '未通过' }
+      case 'probe-proxy':
+        return marker.status === 'ok'
+          ? { step: '外部访问检查', status: 'ok', detail: `通过(HTTP ${code ?? '200'}),外部可正常访问` }
+          : { step: '外部访问检查', status: 'fail', detail: '未通过' }
+      case 'ready':
+        return { step: '就绪', status: 'ok', detail: 'IDE 已就绪,点击「进入我的IDE」进入。' }
+      default:
+        return marker
+    }
+  }
+
   /** Tail one build's console, translating markers into steps and state, until it finishes or the budget ends. */
   private async drive(uid: string, build: number): Promise<ServiceState> {
-    this.appendStep(uid, 'jenkins-running', 'ok', `build #${String(build)}`)
+    this.appendStep(uid, '启动中', 'ok', '启动任务执行中…')
     const deadline = this.clock.now() + this.config.health.timeoutSec * 1000
     let cursor: ConsoleCursor = freshCursor()
     let lastResult = ''
@@ -365,9 +395,11 @@ export class Orchestrator {
       const chunk = await this.jenkins.console(build, cursor.start)
       cursor = { start: chunk.size, more: chunk.more }
       for (const marker of parseMarkers(chunk.text)) {
-        this.appendStep(uid, marker.step, marker.status, marker.detail)
+        const business = this.businessStep(marker)
+        this.appendStep(uid, business.step, business.status, business.detail)
         if (marker.status === 'fail') {
           this.ensure(uid).snapshot.failedStep = marker.step
+          this.appendStep(uid, '启动失败', 'fail', '启动未完成,可再次点击「启动我的IDE」重试。')
           this.failTo(uid, 'FAILED')
           return 'FAILED'
         }
@@ -383,7 +415,7 @@ export class Orchestrator {
       if (result !== undefined) {
         if (result !== 'SUCCESS' && result !== lastResult) {
           this.ensure(uid).snapshot.failedStep = 'jenkins-running'
-          this.appendStep(uid, 'failed', 'fail', `build #${String(build)} ${result}`)
+          this.appendStep(uid, '启动失败', 'fail', `启动未完成(构建 #${String(build)} ${result}),可再次点击「启动我的IDE」重试。`)
           this.failTo(uid, 'FAILED')
           return 'FAILED'
         }
@@ -421,13 +453,6 @@ export class Orchestrator {
       if (match?.[1] !== undefined) out.push(match[1])
     }
     return out
-  }
-
-  /** Re-run the failed action from reconciled state (FR8). */
-  async retry(uid: string): Promise<ServiceState> {
-    const reconcile = await this.reconcileOrFail(uid)
-    if (reconcile === undefined) return 'FAILED'
-    return await this.provision(uid, reconcile.kind === 'absent' ? 'create' : 'start')
   }
 
   /** Attach to the build the marker file names after a portal restart (N3); no-op when absent or finished. */

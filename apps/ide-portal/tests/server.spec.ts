@@ -167,16 +167,41 @@ describe('entry auto-checks on arrival (read-only, fast open)', () => {
   })
 })
 
-describe('warm path (FR3)', () => {
-  it('the check action on a healthy container yields READY-able state without provisioning', async () => {
+/** Cold-run console: the full idempotent create to ready. */
+const COLD = `[DSH_STEP] 1 image-pull ok pulled dev-amd64-abc1234
+[DSH_STEP] 2 docker-run ok created ide-14409
+[DSH_STEP] 3 start-hook ok entrypoint fired
+[DSH_STEP] 4 probe-internal ok HTTP 200 after 3 tries
+[DSH_STEP] 5 probe-proxy ok HTTP 200
+[DSH_STEP] 6 ready ok build SUCCESS
+`
+
+describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
+  it('starting an already-running IDE builds nothing and logs a hint step', async () => {
     const h = await start()
     h.jenkins.script('probe', { console: '[DSH_STEP] 1 reconcile info healthy\n', result: 'SUCCESS' })
+    const page = await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
+    expect(page.status).toBe(200)
+    const arrived = await pollChecked(h)
+    expect(arrived.state.state).toBe('HEALTHY')
+    const before = h.jenkins.triggered.length
+    const started = await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
+    expect(started.status).toBe(202)
+    await pollHint(h)
+    expect(h.jenkins.triggered.length).toBe(before)
+  })
+
+  it('starting from an absent container converges in ONE create build, business steps only', async () => {
+    const h = await start()
+    h.jenkins.script('create', { console: COLD, result: 'SUCCESS' })
     const started = await fetch(`${h.base}/api/provision`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
     expect(started.status).toBe(202)
     const state = await pollState(h)
-    expect(state.state.state).toBe('HEALTHY')
-    expect(state.state.ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
-    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
+    expect(state.state.state).toBe('READY')
+    expect(h.jenkins.triggered.map(t => t.action)).toEqual(['create'])
+    expect(state.steps.map(s => s.step)).toEqual([
+      '开始启动', '排队', '启动中', '准备运行环境', '部署', '启动服务', '启动后自检', '外部访问检查', '就绪',
+    ])
   })
 
   it('POST /api/check re-runs the read-only probe and renders the chain (检查我的IDE button)', async () => {
@@ -204,7 +229,7 @@ describe('cold path page (FR4, FR5)', () => {
     // Provisioning runs detached; poll the authoritative snapshot until it settles.
     const state = await pollState(h)
     expect(state.state.state).toBe('READY')
-    expect(state.steps.map(s => s.step)).toContain('docker-run')
+    expect(state.steps.map(s => s.step)).toContain('部署')
   })
 })
 
@@ -212,6 +237,17 @@ describe('cold path page (FR4, FR5)', () => {
 interface StateSnapshot {
   state: { state: string; checking: boolean; ideUrl: string | undefined }
   steps: { step: string }[]
+}
+
+/** Poll /api/state until a 提示 step shows up (the no-op 启动 hint lands detached). */
+async function pollHint(h: Harness, tries = 200): Promise<void> {
+  for (let attempt = 0; attempt < tries; attempt++) {
+    const response = await fetch(`${h.base}/api/state`, { headers: { authorization: `Bearer ${h.token}` } })
+    const snapshot = await response.json() as StateSnapshot
+    if (snapshot.steps.some(step => step.step === '提示')) return
+    await new Promise<void>((resolve) => { setTimeout(resolve, 5) })
+  }
+  throw new Error('no-op hint never landed')
 }
 
 /** Poll /api/state until the arrival check settles (checking=false with a rendered chain). */
@@ -263,7 +299,7 @@ describe('SSE stream (FR5)', () => {
     }
     controller.abort()
     expect(events[0]?.type).toBe('state')
-    expect(events.some(e => e.type === 'step' && e.step === 'docker-run')).toBe(true)
+    expect(events.some(e => e.type === 'step' && e.step === '部署')).toBe(true)
     expect(events.some(e => e.type === 'state' && e.state === 'READY')).toBe(true)
   })
 })

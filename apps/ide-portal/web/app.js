@@ -1,15 +1,17 @@
 /* The start page is a projection of the server state (0007: 服务端状态权威):
    it renders exactly what /api/state + /api/events carry and holds no
-   business logic of its own. Three buttons (requester decision, 2026-09-06):
-   检查我的IDE re-runs the read-only probe; 启动我的IDE is idempotent —
-   healthy short-circuits, an in-flight run is joined, and only an absent or
-   stopped container triggers create/start; 进入我的IDE jumps. */
+   business logic of its own. Three buttons, always visible (requester
+   decision, 2026-09-06): 检查我的IDE re-runs the read-only probe;
+   启动我的IDE starts idempotently (healthy short-circuits, an in-flight run
+   is joined, only absent/stopped triggers create/start); 进入我的IDE jumps
+   when the service is ready and logs a hint otherwise. Unmet preconditions
+   land as a line in the log area, never as a hidden or disabled button. */
 'use strict'
 
 const statusEl = document.getElementById('status')
 const logEl = document.getElementById('log')
 const checkBtn = document.getElementById('check')
-const provisionBtn = document.getElementById('provision')
+const startBtn = document.getElementById('provision')
 const openBtn = document.getElementById('open')
 
 const LABELS = {
@@ -20,34 +22,28 @@ const LABELS = {
   FAILED: '启动失败,见下方日志;可再次点击“启动我的IDE”重试。',
   TIMEOUT: '健康检查超时;可再次点击“启动我的IDE”重试。',
   IDLE: '服务处于闲置状态,正在唤醒…',
-  UNHEALTHY: '服务异常,正在自动恢复…',
+  UNHEALTHY: '服务异常,点击“启动我的IDE”恢复。',
 }
 
+/** The latest state event; the jump pre-check reads it. */
+let current = { state: 'NO_SERVICE', checking: false, ideUrl: undefined }
 let seenSeq = 0
 // The log is for operators in China: render Beijing time regardless of the
 // browser's timezone (requester, 2026-09-06).
 const logTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
 function renderState(event) {
-  const state = event.state
-  const busy = event.checking || state === 'PROVISIONING' || state === 'STARTING'
+  current = event
   if (event.checking) {
     statusEl.textContent = '正在检查服务状态…'
     statusEl.className = 'state checking'
   } else {
-    statusEl.textContent = state === 'NO_SERVICE' ? '尚未开通:点击“启动我的IDE”创建你的 IDE。' : (LABELS[state] ?? state)
-    statusEl.className = 'state ' + state.toLowerCase()
+    statusEl.textContent = event.state === 'NO_SERVICE' ? '尚未开通:点击“启动我的IDE”创建你的 IDE。' : (LABELS[event.state] ?? event.state)
+    statusEl.className = 'state ' + event.state.toLowerCase()
   }
   if (event.ideUrl) openBtn.href = event.ideUrl
-  openBtn.hidden = !(event.ideUrl && (state === 'READY' || state === 'HEALTHY'))
-  // 检查 stays available except while a probe or a run is in flight.
-  checkBtn.hidden = busy
-  checkBtn.disabled = Boolean(event.checking)
-  // 启动我的IDE covers create, start, and retry; hidden once the service is usable.
-  const needProvision = state === 'NO_SERVICE' || state === 'FAILED' || state === 'TIMEOUT' || state === 'UNHEALTHY' || state === 'IDLE'
-  provisionBtn.hidden = !(needProvision || state === 'PROVISIONING' || state === 'STARTING')
-  provisionBtn.disabled = state === 'PROVISIONING' || state === 'STARTING'
-  provisionBtn.textContent = state === 'PROVISIONING' ? '创建中…' : (state === 'STARTING' ? '启动中…' : '启动我的IDE')
+  // Buttons stay visible in every state; idempotence and the click-time
+  // pre-checks own correctness, not visibility.
 }
 
 function renderStep(step) {
@@ -65,31 +61,51 @@ function renderStep(step) {
   logEl.scrollTop = logEl.scrollHeight
 }
 
+/** A local hint line for an unmet click precondition (same shape as server steps). */
+function hint(detail) {
+  const line = document.createElement('div')
+  line.className = 'step info'
+  line.textContent = `[${logTime.format(new Date())}] 提示 — ${detail}`
+  logEl.appendChild(line)
+  logEl.scrollTop = logEl.scrollHeight
+}
+
 function connect() {
   const source = new EventSource('/api/events')
   source.onmessage = (message) => {
     const event = JSON.parse(message.data)
     if (event.type === 'state') renderState(event)
     else renderStep(event)
-    // Ready states stop at the status line; only the user's click on the
-    // open button navigates (requester decision, 2026-09-06: no auto jump).
+    // Ready states stop at the status line; only the user's click on
+    // 进入我的IDE navigates (requester decision, 2026-09-06: no auto jump).
   }
   source.onerror = () => { /* EventSource reconnects on its own; the server replays on (re)connect. */ }
 }
 
-// 检查 re-runs the read-only arrival probe; the chain streams over SSE.
+// 检查我的IDE re-runs the read-only arrival probe; the chain streams over
+// SSE. A probe already in flight absorbs further clicks server-side.
 checkBtn.addEventListener('click', async () => {
-  checkBtn.disabled = true
   statusEl.textContent = '正在检查服务状态…'
   await fetch('/api/check', { method: 'POST', credentials: 'same-origin' })
 })
 // 启动我的IDE is idempotent on the server; a second click while it runs
 // joins the in-flight run instead of starting a duplicate.
-provisionBtn.addEventListener('click', async () => {
-  provisionBtn.disabled = true
+startBtn.addEventListener('click', async () => {
   await fetch('/api/provision', { method: 'POST', credentials: 'same-origin' })
 })
-openBtn.addEventListener('click', () => { window.location.assign(openBtn.href) })
+// 进入我的IDE jumps only on a settled ready state; anything earlier gets a
+// hint naming the action that unblocks it.
+openBtn.addEventListener('click', () => {
+  const ready = !current.checking && (current.state === 'READY' || current.state === 'HEALTHY') && current.ideUrl
+  if (ready) {
+    window.location.assign(current.ideUrl)
+    return
+  }
+  if (current.checking) hint('正在检查服务状态,请稍候再点击「进入我的IDE」。')
+  else if (current.state === 'NO_SERVICE') hint('尚未开通——请先点击「启动我的IDE」。')
+  else if (current.state === 'PROVISIONING' || current.state === 'STARTING') hint('正在启动,完成后即可「进入我的IDE」。')
+  else hint('服务尚未就绪——请先点击「检查我的IDE」确认状态,必要时「启动我的IDE」。')
+})
 
 // Bootstrap from the authoritative snapshot, then stream (FR5, FR7 joiner
 // view). The arrival check may still be in flight: its chain follows on SSE.

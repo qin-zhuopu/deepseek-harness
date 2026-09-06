@@ -149,6 +149,11 @@ imageTag: dev-amd64-<sha>
 modelKey: {envFile: .env, varName: NR_API_KEY}   # read at create only (FR10, SR5)
 jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 # The auth-iam gate reads its own row; jwks_uri comes from its discovery document.
+# Where the server cannot reach the IAM, iam.trustFile names a JSON file
+# {discovery, jwks} — the two published documents captured from any network
+# that can — and the portal fetches nothing: sign-in and verification run on
+# the seeded issuer/endpoints/keys. Re-capture after an IAM key rotation or
+# tokens signed with new keys are refused.
 iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
 autoCheck: false                       # entry reconciles on arrival when true (0007 FR4); shipped default is the manual check button

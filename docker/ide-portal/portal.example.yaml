@@ -9,6 +9,11 @@ imageTag: dev-amd64                       # pin to dev-amd64-<sha> per rollout s
 modelKey: {envFile: /run/secrets/ide-model.env, varName: NR_API_KEY}
 jenkins: {url: https://new-jenkins.jereh.cn, job: ide-provision, user: portal, tokenEnv: IDE_JENKINS_TOKEN}
 iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback}
+# Where the server cannot reach the IAM, seed the two published documents once
+# from any network that can and point trustFile at the file (0008 offline
+# trust): {discovery: <GET issuer/.well-known/openid-configuration>,
+# jwks: <GET jwks_uri>} as raw JSON. Re-capture it after an IAM key rotation.
+# iam: {issuer: https://iam.jereh.cn/idp, clientId: EnterpriseDingtalk, redirectPath: /auth/callback, trustFile: /etc/ide-portal/iam-trust.json}
 health: {intervalSec: 30, timeoutSec: 600, pollMs: 1500}
 # Entry mode (0007 FR4): false = the start page waits for the user's check
 # button; true = the entry reconciles on arrival and the cold page auto-starts.

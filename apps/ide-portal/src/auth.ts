@@ -17,8 +17,9 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { createProviderSource, type ProviderDocument } from '@deepseek-ai/dsh-host-auth-iam/src/discovery.ts'
-import { verifyIdToken } from '@deepseek-ai/dsh-host-auth-iam/src/id-token.ts'
+import { verifyIdToken, type Jwk } from '@deepseek-ai/dsh-host-auth-iam/src/id-token.ts'
 import {
   DEFAULT_COOKIE,
   decodeBase64UrlJson,
@@ -57,17 +58,57 @@ export interface IamClient {
   document(): Promise<ProviderDocument | undefined>
 }
 
-/** Build the IAM client over the configured issuer. */
+/**
+ * Read the static trust file: `discovery` and `jwks` are the IAM's own two
+ * JSON documents (`<issuer>/.well-known/openid-configuration` and its
+ * `jwks_uri`) captured on a network that can reach the IAM.
+ * @param path - The configured `iam.trustFile`.
+ * @param configuredIssuer - The configured issuer; the file must agree with it.
+ * @returns The provider document, keys included, to serve without any fetch.
+ * @throws When the file is unreadable, malformed, or names a different issuer.
+ */
+function loadTrustFile(path: string, configuredIssuer: string): ProviderDocument {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+  } catch (error) {
+    throw new Error(`portal config: iam.trustFile ${path} is not readable JSON: ${String(error instanceof Error ? error.message : error)}`)
+  }
+  const record = typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  const discovery = typeof record['discovery'] === 'object' && record['discovery'] !== null ? record['discovery'] as Record<string, unknown> : {}
+  const field = (key: string): string | undefined => {
+    const value = discovery[key]
+    return typeof value === 'string' && value !== '' ? value : undefined
+  }
+  const issuer = field('issuer')
+  const authorizationEndpoint = field('authorization_endpoint')
+  const jwksUri = field('jwks_uri')
+  if (issuer === undefined || authorizationEndpoint === undefined || jwksUri === undefined) {
+    throw new Error(`portal config: iam.trustFile ${path} discovery must carry issuer, authorization_endpoint, and jwks_uri`)
+  }
+  if (issuer.replace(/\/+$/, '') !== configuredIssuer) {
+    throw new Error(`portal config: iam.trustFile ${path} issuer "${issuer}" disagrees with iam.issuer "${configuredIssuer}"`)
+  }
+  const jwks = typeof record['jwks'] === 'object' && record['jwks'] !== null ? record['jwks'] as Record<string, unknown> : {}
+  const keys = Array.isArray(jwks['keys']) ? jwks['keys'].filter((key): key is Jwk => typeof key === 'object' && key !== null && !Array.isArray(key) && typeof (key as Record<string, unknown>)['kty'] === 'string') : []
+  if (keys.length === 0) throw new Error(`portal config: iam.trustFile ${path} carries no usable JWKS keys (each needs "kty")`)
+  const endSession = field('end_session_endpoint')
+  return { issuer, authorizationEndpoint, jwksUri, endSessionEndpoint: endSession, keys }
+}
+
+/** Build the IAM client over the configured issuer; `trustFile` makes it fetch-free (offline deployments). */
 export function createIamClient(config: IamConfig, fetchImpl: typeof globalThis.fetch = globalThis.fetch): IamClient {
+  const staticDoc = config.trustFile === undefined ? undefined : loadTrustFile(config.trustFile, config.issuer)
   const provider = createProviderSource({ issuer: config.issuer, refreshMinutes: 60, timeoutMs: 8000 }, fetchImpl)
   async function document(): Promise<ProviderDocument | undefined> {
+    if (staticDoc !== undefined) return staticDoc
     return await provider.get()
   }
   async function verify(token: string): Promise<VerifiedSession | undefined> {
     let doc = await document()
     if (doc === undefined) return undefined
     let claims = verifyIdToken(token, doc.keys, { issuer: doc.issuer, audience: config.clientId }, Math.floor(Date.now() / 1000))
-    if (claims === undefined) {
+    if (claims === undefined && staticDoc === undefined) {
       // A failure may mean the JWK set rotated: one fresh read before rejecting (the shipped gate's rule).
       provider.invalidate()
       doc = await document()

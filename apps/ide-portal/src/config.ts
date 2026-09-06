@@ -28,6 +28,14 @@ export interface IamConfig {
   clientId: string
   /** Exact callback path; must equal the fragment-relay page the login flow lands on. */
   redirectPath: string
+  /**
+   * Trust-on-first-use file: `<issuer>/.well-known/openid-configuration` and
+   * the document's `jwks_uri` (JWKS) as two raw JSON documents. Where the
+   * server cannot reach the IAM, seeding the file once from any network that
+   * can makes sign-in and verification fully offline; refresh it after an IAM
+   * key rotation or the gate refuses tokens signed with new keys.
+   */
+  trustFile?: string
 }
 
 /** Health-probe budget surfaced to the page as elapsed time (C7). */
@@ -129,6 +137,7 @@ export function parsePortalConfig(text: string): PortalConfig {
       issuer: need(iam, 'issuer', 'iam').replace(/\/+$/, ''),
       clientId: need(iam, 'clientId', 'iam'),
       redirectPath: need(iam, 'redirectPath', 'iam'),
+      ...(iam['trustFile'] === undefined ? {} : { trustFile: need(iam, 'trustFile', 'iam') }),
     },
     health: { intervalSec: needNum(health, 'intervalSec', 'health'), timeoutSec: needNum(health, 'timeoutSec', 'health'), pollMs: needNum(health, 'pollMs', 'health') },
     bindHost: raw['bindHost'] === undefined ? '127.0.0.1' : need(raw, 'bindHost', 'root'),

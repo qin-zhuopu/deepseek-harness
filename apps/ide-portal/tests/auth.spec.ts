@@ -196,3 +196,76 @@ describe('authorizeUrl', () => {
     expect(url.searchParams.get('state')).toBe('st123')
   })
 })
+
+describe('offline trust (iam.trustFile)', () => {
+  /** Capture the live fake's two published documents the way an operator seeds the file. */
+  async function seedTrustFile(issuer: string, dir: string): Promise<string> {
+    const base = issuer.replace(/\/+$/, '')
+    const readJson = async (url: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await (await fetch(url)).text()) as Record<string, unknown>
+    const discovery = await readJson(`${base}/.well-known/openid-configuration`)
+    const jwks = await readJson(String(discovery['jwks_uri']))
+    const path = join(dir, 'iam-trust.json')
+    await writeFile(path, JSON.stringify({ discovery, jwks }))
+    return path
+  }
+
+  async function offlineSetup(): Promise<{ config: PortalConfig; iam: IamClient; issuer: string }> {
+    const { issuer } = await startIdp()
+    const trustFile = await seedTrustFile(issuer, context?.dir ?? '/tmp')
+    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-auth-'))
+    const envFile = join(dir, '.env')
+    await writeFile(envFile, 'NR_API_KEY=sk-test\n')
+    const config = parsePortalConfig(`
+domainSuffix: jereh-pe.cn
+entryHost: ide.jereh-pe.cn
+uid: {claim: sub, crossCheckClaim: userId, pattern: "^[0-9]{1,8}$"}
+imageTag: t
+modelKey: {envFile: ${JSON.stringify(envFile)}, varName: NR_API_KEY}
+jenkins: {url: http://jenkins.invalid, job: j, user: u, tokenEnv: IDE_JENKINS_TOKEN}
+iam: {issuer: ${issuer}, clientId: EnterpriseDingtalk, redirectPath: /auth/callback, trustFile: ${JSON.stringify(trustFile)}}
+health: {intervalSec: 30, timeoutSec: 600, pollMs: 1}
+`)
+    // No fetch ever: an unreachable IAM answers every request with a refusal.
+    const never = ((): never => { throw new Error('offline deployment must not fetch') }) as unknown as typeof globalThis.fetch
+    return { config, iam: createIamClient(config.iam, never), issuer }
+  }
+
+  it('verifies and redirects from the seeded file with the IAM unreachable', async () => {
+    const { config, iam } = await offlineSetup()
+    const session = await iam.verify(idToken(config.iam.issuer))
+    expect(session?.sub).toBe('14409')
+    const captured = fakeRes()
+    await beginLogin(config.iam, iam, fakeReq({}), captured.res, '/')
+    expect(captured.status).toBe(302)
+  })
+
+  it('refuses a token signed with a key outside the seeded set', async () => {
+    const { config, iam } = await offlineSetup()
+    const other = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    expect(await iam.verify(idToken(config.iam.issuer, {}, other.privateKey))).toBeUndefined()
+  })
+
+  it('refuses a trust file whose issuer disagrees with iam.issuer', async () => {
+    const { issuer } = await startIdp()
+    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-auth-'))
+    const path = join(dir, 'iam-trust.json')
+    await writeFile(path, JSON.stringify({
+      discovery: { issuer: 'https://iam.other.cn/idp', authorization_endpoint: 'https://iam.other.cn/idp/authCenter/authenticate', jwks_uri: 'https://iam.other.cn/idp/oidc/getPublicKey' },
+      jwks: { keys: [key.publicKey.export({ format: 'jwk' })] },
+    }))
+    expect(() => createIamClient({ issuer, clientId: 'EnterpriseDingtalk', redirectPath: '/auth/callback', trustFile: path })).toThrow(/disagrees/)
+  })
+
+  it('refuses an unreadable or keyless trust file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ide-portal-auth-'))
+    const base = { issuer: 'https://iam.jereh.cn/idp', clientId: 'c', redirectPath: '/auth/callback' }
+    expect(() => createIamClient({ ...base, trustFile: join(dir, 'missing.json') })).toThrow(/not readable JSON/)
+    const keyless = join(dir, 'keyless.json')
+    await writeFile(keyless, JSON.stringify({
+      discovery: { issuer: base.issuer, authorization_endpoint: `${base.issuer}/authCenter/authenticate`, jwks_uri: `${base.issuer}/oidc/getPublicKey` },
+      jwks: { keys: [] },
+    }))
+    expect(() => createIamClient({ ...base, trustFile: keyless })).toThrow(/no usable JWKS keys/)
+  })
+})

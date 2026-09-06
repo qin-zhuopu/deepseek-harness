@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/ops/2026-09-06-ide-portal-jenkins-deploy.md
-2026-09-06-ide-portal-jenkins-deploy.md: 559a2a2c667dd22f4e44f16079d3f1fb970daef7
-2026-09-06-ide-portal-jenkins-deploy.zh.md: 9df0b7961606d868cd2a191b04418fc36c5f7422
+2026-09-06-ide-portal-jenkins-deploy.md: 22e424d3fa6cc2dac6f327489c9e411a69f6046b
+2026-09-06-ide-portal-jenkins-deploy.zh.md: 4e40f7fe6b465f01bbc0d4b6a12221bb7bc7692f

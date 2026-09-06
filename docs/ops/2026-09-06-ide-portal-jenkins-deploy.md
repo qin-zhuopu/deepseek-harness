@@ -21,16 +21,31 @@ English | [中文](2026-09-06-ide-portal-jenkins-deploy.zh.md)
 3. The portal Dockerfile now deletes the root `postinstall` (lefthook) from the copied `package.json` before `pnpm install` (dev-worktree tooling, fails outside a git checkout), installs the full workspace, and runs `pnpm run build:lib:host`: `@deepseek-ai/dsh-host-auth-core`'s package main entry is built `lib/`, which git does not ship. Without it the container restarts in a loop with `ERR_MODULE_NOT_FOUND`; the proxy answers 502 for its vhost meanwhile.
 4. Heredoc `$(...)` inside a Jenkins `sh '''…'''` runs on the agent, not the host — pass values in as `bash -s --` arguments instead.
 
-## Egress finding
+## Egress finding and the offline-trust resolution
 
-10.1.17.58 cannot reach **production** `iam.jereh.cn` (10.1.13.181): ping/443/80 all dead from the host itself (not a docker/iptables problem — `--network host` and the bridge behave the same). Jenkins and Nexus from the same host are fine. The **test** env `iam-test.jereh.cn` (10.1.17.35, same subnet) answers from both the host and 17.58's containers: pointing `portal.yaml` at `https://iam-test.jereh.cn/idp` rendered the real IAM login page end-to-end through Chrome. Production `portal.yaml` is restored; when the network side opens 17.58 → 10.1.13.181, no portal change is needed.
+10.1.17.58 cannot reach **production** `iam.jereh.cn` (10.1.13.181): ping/443/80 all dead from the host itself (not a docker/iptables problem — `--network host` and the bridge behave the same). Jenkins and Nexus from the same host are fine. The **test** env `iam-test.jereh.cn` (10.1.17.35, same subnet) answers from both the host and 17.58's containers: pointing `portal.yaml` at `https://iam-test.jereh.cn/idp` rendered the real IAM login page end-to-end through Chrome.
+
+The server-side IAM traffic is two static GETs (discovery document, JWKS); the sign-in round-trip itself runs in the user's browser. The portal now accepts `iam.trustFile`: capture the two documents from any network that can reach the IAM, seed the file on the host, and the portal fetches nothing. Seed command and the conditional mount live in [docker/deploy-ide-portal.sh](../../docker/deploy-ide-portal.sh).
+
+Live seed (from a network that can reach the IAM) and host wiring:
+
+```bash
+node -e 'const f=async(u)=>JSON.parse(await (await fetch(u)).text());
+  (async()=>{const d=await f("https://iam.jereh.cn/idp/.well-known/openid-configuration");
+    process.stdout.write(JSON.stringify({discovery:d,jwks:await f(d.jwks_uri)))})()' > /opt/ide-provision/iam-trust.json
+chmod 600 /opt/ide-provision/iam-trust.json
+# portal.yaml: iam: {…, trustFile: /etc/ide-portal/iam-trust.json}
+# docker run adds: -v /opt/ide-provision/iam-trust.json:/etc/ide-portal/iam-trust.json:ro
+```
+
+Deployed as-is: `GET /login` answers the `302` to `https://iam.jereh.cn/idp/authCenter/authenticate…` with the server never leaving its network, and the Chrome session reaches the real production IAM login page — the user's browser is the side that needs IAM. Re-capture the file after an IAM key rotation.
 
 ## Verification
 
-- Chrome (CDP, this container): `http://ide.jereh-pe.cn/` → `302 /login?next=/` → IAM authCenter page renders (test env; screenshot taken). Unreachable prod IAM renders the gate's `identity provider unreachable` page — the fail-loud path works.
+- Chrome (CDP, this container): `http://ide.jereh-pe.cn/` → `302 /login?next=/` → IAM authCenter page renders (test env, screenshot; then production IAM through the seeded trust file, screenshot). Unreachable IAM without a trust file renders the gate's `identity provider unreachable` page — the fail-loud path works.
 - Container health: `GET /` (HTML) 302→/login; `/api/state` 401 (API contract); direct container-IP probe 302/401; nginx-proxy vhost live within seconds of `docker run`.
 - Wildcard DNS: `ide-<uid>.jereh-pe.cn` already resolves (probed `ide-14409`), so per-user vhosts will need nothing extra.
-- `10.1.13.181` (production IAM) answers from this agent container (200) but not from 10.1.17.58; `10.1.17.35` (IAM test, same subnet as 17.58) answers from both. Real sign-in on 17.58 needs a server-side reachability plan for prod (route/firewall from the app subnet, or an in-subnet issuer alias) — the portal's fail-loud page covers the gap meanwhile.
+- `10.1.13.181` (production IAM) answers from this agent container (200) but not from 10.1.17.58; `10.1.17.35` (IAM test, same subnet as 17.58) answers from both. The trust file closes the gap server-side; a user whose own machine also cannot reach the IAM cannot sign in on any deployment, since the sign-in round-trip is the browser's.
 - The implicit flow needs no client secret by design: the browser completes the round-trip and the portal verifies the `id_token` against published JWKS, so no `usk` cookie is forgeable or obtainable headlessly. Scripted clients keep using the shared-secret JWT gate; the portal browser session is the browser's own.
 - `/opt/ide-provision/model-key.env` is a placeholder: create-action provisioning needs the requester's `NR_API_KEY` written there; probe/start/health run without it (verified).
 

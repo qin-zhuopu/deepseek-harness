@@ -21,16 +21,31 @@
 3. 门户 Dockerfile 现在在 `pnpm install` 前从复制进来的 `package.json` 删掉根 `postinstall`(lefthook,开发工作树工具,在 git 检出外必炸),安装全 workspace,再跑 `pnpm run build:lib:host`:`@deepseek-ai/dsh-host-auth-core` 的包主入口是构建产物 `lib/`,而 git 不携带它。缺这一步容器会带着 `ERR_MODULE_NOT_FOUND` 循环重启;期间代理对它的 vhost 回答 502。
 4. Jenkins `sh '''…'''` 里 heredoc 的 `$(...)` 在 agent 上展开,不在宿主上——把值当 `bash -s --` 参数传进去。
 
-## 出网发现
+## 出网发现与离线信任的解法
 
-10.1.17.58 到**生产** `iam.jereh.cn`(10.1.13.181)不通:从宿主本身 ping/443/80 全死(不是 docker/iptables 问题——`--network host` 和网桥表现相同)。同一宿主到 Jenkins 和 Nexus 正常。**测试**环境 `iam-test.jereh.cn`(10.1.17.35,同子网)宿主机和 17.58 上的容器都通:把 `portal.yaml` 指到 `https://iam-test.jereh.cn/idp`,真实 IAM 登录页经 Chrome 端到端渲染出来。生产 `portal.yaml` 已还原;等网络侧打通 17.58 → 10.1.13.181,门户无需任何改动。
+10.1.17.58 到**生产** `iam.jereh.cn`(10.1.13.181)不通:从宿主本身 ping/443/80 全死(不是 docker/iptables 问题——`--network host` 和网桥表现相同)。同一宿主到 Jenkins 和 Nexus 正常。**测试**环境 `iam-test.jereh.cn`(10.1.17.35,同子网)宿主机和 17.58 上的容器都通:把 `portal.yaml` 指到 `https://iam-test.jereh.cn/idp`,真实 IAM 登录页经 Chrome 端到端渲染出来。
+
+服务端对 IAM 只有两个静态 GET(发现文档、JWKS);登录往返本身跑在用户的浏览器里。门户现在接受 `iam.trustFile`:从任何够得到 IAM 的网络抓下这两份文档、灌到宿主机上,门户就完全不 fetch。抓取命令和条件挂载都在 [docker/deploy-ide-portal.sh](../../docker/deploy-ide-portal.sh) 里。
+
+线上落地的灌法(在够得到 IAM 的网络上执行)与宿主接线:
+
+```bash
+node -e 'const f=async(u)=>JSON.parse(await (await fetch(u)).text());
+  (async()=>{const d=await f("https://iam.jereh.cn/idp/.well-known/openid-configuration");
+    process.stdout.write(JSON.stringify({discovery:d,jwks:await f(d.jwks_uri)))})()' > /opt/ide-provision/iam-trust.json
+chmod 600 /opt/ide-provision/iam-trust.json
+# portal.yaml: iam: {…, trustFile: /etc/ide-portal/iam-trust.json}
+# docker run adds: -v /opt/ide-provision/iam-trust.json:/etc/ide-portal/iam-trust.json:ro
+```
+
+就这样部署后:`GET /login` 直接回 `https://iam.jereh.cn/idp/authCenter/authenticate…` 的 `302`,服务端一步都没有出网,Chrome 会话到达真实的生产 IAM 登录页——需要够到 IAM 的是用户的浏览器。IAM 轮换密钥后重抓该文件。
 
 ## 验证
 
-- Chrome(CDP,本容器):`http://ide.jereh-pe.cn/` → `302 /login?next=/` → IAM authCenter 页渲染(测试环境;已截图)。生产 IAM 不可达时渲染闸门的 `identity provider unreachable` 页——失败即报路径工作正常。
+- Chrome(CDP,本容器):`http://ide.jereh-pe.cn/` → `302 /login?next=/` → IAM authCenter 页渲染(测试环境,已截图;随后经灌入的信任文件到生产 IAM,已截图)。没有信任文件且 IAM 不可达时,渲染闸门的 `identity provider unreachable` 页——失败即报路径工作正常。
 - 容器健康:`GET /`(HTML)302→/login;`/api/state` 401(API 契约);直连容器 IP 探测 302/401;nginx-proxy 的 vhost 在 `docker run` 后数秒内生效。
 - 通配 DNS:`ide-<uid>.jereh-pe.cn` 已经解析(用 `ide-14409` 探过),每用户 vhost 不需要任何额外配置。
-- `10.1.13.181`(生产 IAM)从本 agent 容器有应答(200),从 10.1.17.58 没有;`10.1.17.35`(IAM 测试,与 17.58 同子网)两边都有。17.58 上的真实登录需要给生产定一个服务端可达方案(应用子网的路由/防火墙,或子网内的 issuer 别名)——空档期门户的失败即报页兜底。
+- `10.1.13.181`(生产 IAM)从本 agent 容器有应答(200),从 10.1.17.58 没有;`10.1.17.35`(IAM 测试,与 17.58 同子网)两边都有。信任文件把服务端这一侧的空档补上了;用户自己的机器够不到 IAM 时,在任何部署上都登录不了——登录往返是浏览器的。
 - 隐式流按设计不需要 client secret:浏览器完成往返,门户对照公开 JWKS 验 `id_token`,因此 `usk` cookie 既伪造不出也拿不到。脚本客户端继续用共享口令 JWT 闸门;门户的浏览器会话就是浏览器自己的。
 - `/opt/ide-provision/model-key.env` 是占位:create 动作的开通需要需求方把 `NR_API_KEY` 写进去;probe/start/健康检查不带它也能跑(已验证)。
 

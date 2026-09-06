@@ -88,7 +88,7 @@ docker run -d --name ide-14409 \
   --restart unless-stopped \
   --shm-size 1g \
   --label com.jereh.uid=14409 \
-  -v ide-14409-workspace:/root/workspace \
+  -v ide-14409-workspace:/workspaces/system-admin \
   -v ide-14409-dshome:/root/.dsh \
   --env-file /opt/ide-provision/ide-14409.env \
   -e FRONT_PORT=8080 -e VNC_PUBLIC_URL=/vnc -e RESIZE_ENDPOINT=/resize \

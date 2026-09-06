@@ -193,7 +193,7 @@ case "$ACTION" in
         --restart unless-stopped \
         --shm-size 1g \
         --label "com.jereh.uid=${UID_ARG}" \
-        -v "${CONTAINER}-workspace:/root/workspace" \
+        -v "${CONTAINER}-workspace:/workspaces/system-admin" \
         -v "${CONTAINER}-dshome:/root/.dsh" \
         "${TRUST_MOUNT[@]}" \
         --env-file "$ENV_FILE" \

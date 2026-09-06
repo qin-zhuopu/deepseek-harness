@@ -216,31 +216,39 @@ export class Orchestrator {
   /**
    * Reconcile (FR6): run the probe job and adopt what the host reports. The
    * result replaces any stale in-memory state unless a provisioning run is
-   * in flight for this uid.
+   * in flight for this uid. The chain streams incrementally (requester,
+   * 2026-09-06): identity steps, the Jenkins lifecycle, then one step per
+   * probe marker as the console tail yields it — never a single dump at the
+   * end of a silent wait.
    */
   async reconcile(uid: string): Promise<Reconcile> {
     if (this.busy.has(uid)) {
       const current = this.run(uid).snapshot.state
       return current === 'HEALTHY' || current === 'READY' ? { kind: 'healthy' } : { kind: 'exists', running: true }
     }
-    const build = await this.trigger(uid, 'probe')
-    const markers = await this.tailBuild(build)
-    const line = markers.find(marker => marker.step === 'reconcile')
-    if (line === undefined || line.status === 'fail') throw new Error(`reconcile: probe build #${String(build)} returned no reconcile marker`)
-    const reconcile = reconcileFromDetail(line.detail)
-    const run = this.ensure(uid)
-    run.snapshot = { state: stateFromReconcile(reconcile), build, failedStep: undefined }
-    run.updatedMs = this.clock.now()
     // Each check renders as one chain (requester, 2026-09-06): a fresh arrival
     // must not replay the day's older chains, or a stale 正常 verdict drowns
     // the new one. `seq` stays monotonic, so connected pages dedup correctly.
+    const run = this.ensure(uid)
     run.steps = []
     this.appendStep(uid, '工号', 'info', uid)
     this.appendStep(uid, '域名', 'info', ideUrl(this.config, uid))
-    for (const marker of markers) {
+    this.appendStep(uid, '检查', 'info', '已触发检查任务,等待 Jenkins 执行…')
+    const build = await this.trigger(uid, 'probe')
+    this.appendStep(uid, 'jenkins-running', 'ok', `检查构建 #${String(build)}`)
+    let verdict: Reconcile | undefined
+    const markers = await this.tailBuild(build, (marker) => {
+      if (marker.step === 'reconcile' && marker.status !== 'fail') verdict = reconcileFromDetail(marker.detail)
       const label = CHECK_LABELS[marker.step]
       if (label !== undefined) this.appendStep(uid, label, marker.status, humanizeDetail(marker.step, marker.detail))
+    })
+    const line = markers.find(marker => marker.step === 'reconcile')
+    if (line === undefined || line.status === 'fail' || verdict === undefined) {
+      throw new Error(`reconcile: probe build #${String(build)} returned no reconcile marker`)
     }
+    const reconcile = verdict
+    run.snapshot = { state: stateFromReconcile(reconcile), build, failedStep: undefined }
+    run.updatedMs = this.clock.now()
     // Absent and healthy are legitimate verdicts (info); a container that
     // exists but fails its health probe is the only red conclusion.
     this.appendStep(uid, '结论', reconcile.kind === 'exists' ? 'fail' : 'info', verdictDetail(reconcile))
@@ -324,15 +332,21 @@ export class Orchestrator {
     return build
   }
 
-  /** Run the short probe build to completion and return its markers (reconcile reads the `reconcile` marker). */
-  private async tailBuild(build: number): Promise<{ step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }[]> {
+  /** Run the short probe build to completion, returning its markers; `onMarker` streams each as the tail yields it. */
+  private async tailBuild(
+    build: number,
+    onMarker?: (marker: { step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }) => void,
+  ): Promise<{ step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }[]> {
     const all: { step: StepName; status: 'ok' | 'fail' | 'info'; detail: string }[] = []
     let cursor = freshCursor()
     const deadline = this.clock.now() + 120_000
     for (;;) {
       const chunk = await this.jenkins.console(build, cursor.start)
       cursor = { start: chunk.size, more: chunk.more }
-      all.push(...parseMarkers(chunk.text))
+      for (const marker of parseMarkers(chunk.text)) {
+        all.push(marker)
+        onMarker?.(marker)
+      }
       if (all.some(marker => marker.step === 'ready' || marker.step === 'failed')) break
       const result = await this.jenkins.result(build)
       if (result !== undefined || this.clock.now() > deadline) break

@@ -187,7 +187,7 @@ describe('warm path (FR3)', () => {
     const snapshot = await pollChecked(h)
     expect(h.jenkins.triggered.map(t => t.action)).toEqual(['probe'])
     expect(snapshot.state.state).toBe('NO_SERVICE')
-    expect(snapshot.steps.map(s => s.step)).toEqual(['工号', '域名', '结论'])
+    expect(snapshot.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '结论'])
   })
 })
 

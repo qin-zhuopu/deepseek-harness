@@ -79,7 +79,10 @@ export function createPortalServer(
       return
     }
     const body = readFileSync(abs)
-    res.writeHead(200, { 'content-type': contentType, 'content-length': String(body.length) })
+    // no-cache (not no-store): the shell is tiny and must never go stale
+    // against app.js — a cached index with hidden buttons next to a fresh
+    // app.js that no longer unhides them renders an empty action bar.
+    res.writeHead(200, { 'content-type': contentType, 'content-length': String(body.length), 'cache-control': 'no-cache' })
     res.end(body)
   }
 

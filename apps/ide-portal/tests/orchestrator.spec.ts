@@ -76,7 +76,7 @@ describe('cold path (FR4, US1)', () => {
     const state = await orchestrator.enter('14409')
     expect(state).toBe('READY')
     expect(orchestrator.run('14409').steps.map(s => s.step)).toEqual([
-      '工号', '域名', '结论', 'lock', 'jenkins-queued', 'jenkins-running',
+      '工号', '域名', '检查', 'jenkins-running', '结论', 'lock', 'jenkins-queued', 'jenkins-running',
       'image-pull', 'docker-run', 'start-hook', 'probe-internal', 'probe-proxy', 'ready',
     ])
     const create = jenkins.triggered.find(t => t.action === 'create')
@@ -108,7 +108,7 @@ describe('arrival check (fast open, 2026-09-06)', () => {
     const run = orchestrator.run('14409')
     // The second check shows one fresh chain (no replayed history drowning the
     // new verdict) and its seqs continue past the first check's.
-    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '结论'])
+    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '结论'])
     expect(run.snapshot.state).toBe('NO_SERVICE')
     expect(Math.min(...run.steps.map(s => s.seq))).toBeGreaterThan(Math.max(...firstSeqs))
   })
@@ -120,8 +120,8 @@ describe('arrival check (fast open, 2026-09-06)', () => {
     await orchestrator.arrive('14409')
     const run = orchestrator.run('14409')
     expect(orchestrator.stateEvent('14409').checking).toBe(false)
-    expect(run.steps.map(s => s.step)).toEqual(['检查'])
-    expect(run.steps[0]?.status).toBe('fail')
+    expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', 'jenkins-running', '检查'])
+    expect(run.steps.at(-1)?.status).toBe('fail')
     expect(run.snapshot.state).toBe('NO_SERVICE')
   })
 })

@@ -88,6 +88,23 @@ container_ip() {
   docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$CONTAINER" 2>/dev/null || true
 }
 
+# Where the container's vhost/service is declared, for the portal's check
+# chain (requester, 2026-09-06: the page shows the compose file position and
+# service name). Compose-managed containers carry the project labels; the
+# containers this script creates with docker run report that honestly.
+compose_info() {
+  local cf svc line
+  cf=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$CONTAINER" 2>/dev/null || true)
+  svc=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)
+  if [ -n "$cf" ] && [ -n "$svc" ] && [ -f "$cf" ]; then
+    line=$(grep -n -m1 "^[[:space:]]*${svc}:" "$cf" 2>/dev/null | cut -d: -f1)
+    if [ -n "$line" ]; then mark compose info "${cf}:${line} service=${svc}"; return; fi
+    mark compose info "${cf} service=${svc}"
+    return
+  fi
+  mark compose info "非 compose 管理(docker run,由 provision.sh 创建)"
+}
+
 probe_internal_once() {
   local ip; ip=$(container_ip)
   [ -n "$ip" ] || { CODE=000; return 1; }
@@ -128,13 +145,22 @@ start_and_probe() {
 case "$ACTION" in
   probe)
     # Reconcile (FR6): a fast verdict on host truth, never a mutation. The
-    # portal reads the single `reconcile` marker line.
+    # portal reads the `reconcile` verdict plus the service/compose/health
+    # facts and renders the chain 工号 → 域名 → 服务状态 → Compose 位置 →
+    # 健康检查 → 结论 (requester, 2026-09-06).
     status=$(container_status)
+    mark service info "docker: ${status}"
+    compose_info
     case "$status" in
       absent) mark reconcile info absent; mark ready ok "nothing to reconcile" ;;
       running)
-        if probe_internal_once; then mark reconcile info healthy
-        else mark reconcile info running-unhealthy; fi
+        if probe_internal_once; then
+          mark health ok "HTTP ${CODE} from container"
+          mark reconcile info healthy
+        else
+          mark health fail "no answer (last ${CODE})"
+          mark reconcile info running-unhealthy
+        fi
         mark ready ok "probe done"
         ;;
       exited | created | dead) mark reconcile info stopped; mark ready ok "probe done" ;;

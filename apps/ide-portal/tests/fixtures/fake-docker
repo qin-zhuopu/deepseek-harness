@@ -22,6 +22,8 @@ case "$cmd" in
       *State.Status*) cat "$state_file" ;;
       *IPAddress*)
         if [ "$(cat "$state_file")" = running ]; then echo 172.20.0.99; else echo ""; fi ;;
+      *Config.Labels*)
+        echo "" ;;
       *) echo '{}' ;;
     esac ;;
   image)

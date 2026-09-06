@@ -76,7 +76,7 @@ describe('cold path (FR4, US1)', () => {
     const state = await orchestrator.enter('14409')
     expect(state).toBe('READY')
     expect(orchestrator.run('14409').steps.map(s => s.step)).toEqual([
-      'reconcile', 'lock', 'jenkins-queued', 'jenkins-running',
+      '工号', '域名', '检查结论', 'lock', 'jenkins-queued', 'jenkins-running',
       'image-pull', 'docker-run', 'start-hook', 'probe-internal', 'probe-proxy', 'ready',
     ])
     const create = jenkins.triggered.find(t => t.action === 'create')

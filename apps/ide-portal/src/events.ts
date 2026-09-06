@@ -12,7 +12,8 @@ export interface StepEvent {
   type: 'step'
   seq: number
   /** One of the fixed step names; unknown names are a bug, not a display fallback. */
-  step: StepName
+  /** Step name as displayed: canonical run steps and the check chain's labels. */
+  step: string
   status: 'ok' | 'fail' | 'info'
   detail: string
   /** Epoch millis the backend observed the step at. */
@@ -21,6 +22,9 @@ export interface StepEvent {
 
 /** The named steps of one run, in canonical order (0008 Live log). */
 export const STEP_NAMES = [
+  'service',
+  'compose',
+  'health',
   'reconcile',
   'lock',
   'jenkins-queued',

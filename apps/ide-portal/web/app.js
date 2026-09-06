@@ -24,6 +24,9 @@ const LABELS = {
 }
 
 let seenSeq = 0
+// The log is for operators in China: render Beijing time regardless of the
+// browser's timezone (requester, 2026-09-06).
+const logTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
 function renderState(event) {
   const checking = checkBtn.disabled && event.state === 'NO_SERVICE'
@@ -39,7 +42,7 @@ function renderState(event) {
 function renderStep(step) {
   if (step.seq <= seenSeq) return
   seenSeq = step.seq
-  const time = new Date(step.atMs).toLocaleTimeString()
+  const time = logTime.format(new Date(step.atMs))
   const line = document.createElement('div')
   line.className = 'step ' + step.status
   line.textContent = `[${time}] ${step.step} — ${step.detail}`

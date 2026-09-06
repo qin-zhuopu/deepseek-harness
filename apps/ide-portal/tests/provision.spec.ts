@@ -90,32 +90,59 @@ describe('reconcile (probe action, FR6)', () => {
     await seed({ image: true, http: '200' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-1', 'jereh-pe.cn'])
     expect(run.code).toBe(0)
-    expect(steps(run.stdout)).toEqual(['reconcile info absent', 'ready ok nothing to reconcile'])
+    expect(steps(run.stdout)).toEqual([
+      'service info docker: absent',
+      'compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+      'reconcile info absent',
+      'ready ok nothing to reconcile',
+    ])
   })
 
   it('maps an empty inspect status to absent (docker that renders no status)', async () => {
     await seed({ container: '', image: true, http: '200' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-1e', 'jereh-pe.cn'])
     expect(run.code).toBe(0)
-    expect(steps(run.stdout)).toEqual(['reconcile info absent', 'ready ok nothing to reconcile'])
+    expect(steps(run.stdout)).toEqual([
+      'service info docker: absent',
+      'compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+      'reconcile info absent',
+      'ready ok nothing to reconcile',
+    ])
   })
 
   it('answers healthy when the web answers, whatever the gate code', async () => {
     await seed({ container: 'running', image: true, http: '401' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-2', 'jereh-pe.cn'])
-    expect(steps(run.stdout)[0]).toBe('reconcile info healthy')
+    expect(steps(run.stdout)).toEqual([
+      'service info docker: running',
+      'compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+      'health ok HTTP 401 from container',
+      'reconcile info healthy',
+      'ready ok probe done',
+    ])
   })
 
   it('answers running-unhealthy when the front does not answer', async () => {
     await seed({ container: 'running', image: true, http: '502' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-3', 'jereh-pe.cn'])
-    expect(steps(run.stdout)[0]).toBe('reconcile info running-unhealthy')
+    expect(steps(run.stdout)).toEqual([
+      'service info docker: running',
+      'compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+      'health fail no answer (last 502)',
+      'reconcile info running-unhealthy',
+      'ready ok probe done',
+    ])
   })
 
   it('answers stopped for an exited container', async () => {
     await seed({ container: 'exited', image: true, http: '200' })
     const run = await runScript(dir, '', ['14409', 'probe', 'img:tag', 'req-4', 'jereh-pe.cn'])
-    expect(steps(run.stdout)[0]).toBe('reconcile info stopped')
+    expect(steps(run.stdout)).toEqual([
+      'service info docker: exited',
+      'compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+      'reconcile info stopped',
+      'ready ok probe done',
+    ])
   })
 })
 

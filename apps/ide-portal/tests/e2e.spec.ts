@@ -38,9 +38,18 @@ function idToken(issuer: string, over: Record<string, unknown> = {}): string {
 
 /** Console scripts per Jenkins action; the create/start sets drive the portal to READY. */
 const rawConsoles: Record<string, string> = {
-  'probe:absent': '[DSH_STEP] 1 reconcile info absent\n',
-  'probe:healthy': '[DSH_STEP] 1 reconcile info healthy\n',
-  'probe:stopped': '[DSH_STEP] 1 reconcile info stopped\n',
+  'probe:absent': [
+    '[DSH_STEP] 1 service info docker: absent',
+    '[DSH_STEP] 2 compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+    '[DSH_STEP] 3 reconcile info absent',
+  ].join('\n') + '\n',
+  'probe:healthy': [
+    '[DSH_STEP] 1 service info docker: running',
+    '[DSH_STEP] 2 compose info 非 compose 管理(docker run,由 provision.sh 创建)',
+    '[DSH_STEP] 3 health ok HTTP 302 from container',
+    '[DSH_STEP] 4 reconcile info healthy',
+  ].join('\n') + '\n',
+  'probe:stopped': '[DSH_STEP] 1 service info docker: exited\n[DSH_STEP] 2 compose info 非 compose 管理\n[DSH_STEP] 3 reconcile info stopped\n',
   create: [
     '[DSH_STEP] 1 image-pull ok pulled dev-amd64-abc1234',
     '[DSH_STEP] 2 docker-run ok created ide-14409',
@@ -376,6 +385,18 @@ describe('portal end-to-end (real process, real sockets)', () => {
     const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
+    // The check reads as the requested chain: identity, domain, host facts, verdict.
+    const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
+    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '检查结论', '结论'].includes(step.step))
+    expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
+      '工号: 14409',
+      '域名: http://ide-14409.jereh-pe.cn/',
+      '服务状态: docker: running',
+      'Compose 位置: 非 compose 管理(docker run,由 provision.sh 创建)',
+      '健康检查: HTTP 302 from container',
+      '检查结论: healthy',
+      '结论: 专属IDE状态正常',
+    ])
   }, 30_000)
 
   it('the entry auto-checks on arrival: a healthy container renders the page on HEALTHY without provisioning', async () => {
@@ -386,6 +407,18 @@ describe('portal end-to-end (real process, real sockets)', () => {
     const final = await pollState(stack.portalBase, token, 'HEALTHY', 400, stack)
     expect((final['state'] as { ideUrl?: string }).ideUrl).toBe('http://ide-14409.jereh-pe.cn/')
     expect(stack.jenkinsHits.filter(hit => hit === 'POST /job/ide-provision/buildWithParameters')).toHaveLength(1)
+    // The check reads as the requested chain: identity, domain, host facts, verdict.
+    const steps = (final['steps'] ?? []) as { step: string; detail: string }[]
+    const chain = steps.filter(step => ['工号', '域名', '服务状态', 'Compose 位置', '健康检查', '检查结论', '结论'].includes(step.step))
+    expect(chain.map(step => `${step.step}: ${step.detail}`)).toEqual([
+      '工号: 14409',
+      '域名: http://ide-14409.jereh-pe.cn/',
+      '服务状态: docker: running',
+      'Compose 位置: 非 compose 管理(docker run,由 provision.sh 创建)',
+      '健康检查: HTTP 302 from container',
+      '检查结论: healthy',
+      '结论: 专属IDE状态正常',
+    ])
   }, 30_000)
 
   it('attaches to the marker-named build after a portal restart and drives it to READY', async () => {

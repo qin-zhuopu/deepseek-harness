@@ -48,6 +48,9 @@ export function resolveUid(config: PortalConfig, claims: Record<string, unknown>
   return sub
 }
 
+/** Display labels for the probe's host-fact markers (requester chain, 2026-09-06). */
+const CHECK_LABELS: Record<string, string> = { service: '服务状态', compose: 'Compose 位置', health: '健康检查', reconcile: '检查结论' }
+
 /** The reconcile verdict the probe job reports via its `reconcile` marker detail. */
 function reconcileFromDetail(detail: string): Reconcile {
   switch (detail.trim()) {
@@ -115,7 +118,7 @@ export class Orchestrator {
     for (const listener of this.listeners) listener(uid, event)
   }
 
-  private appendStep(uid: string, step: StepName, status: StepEvent['status'], detail: string): void {
+  private appendStep(uid: string, step: string, status: StepEvent['status'], detail: string): void {
     const run = this.ensure(uid)
     const event: StepEvent = { type: 'step', seq: run.steps.length + 1, step, status, detail, atMs: this.clock.now() }
     run.steps.push(event)
@@ -164,7 +167,15 @@ export class Orchestrator {
     const run = this.ensure(uid)
     run.snapshot = { state: stateFromReconcile(reconcile), build, failedStep: undefined }
     run.updatedMs = this.clock.now()
-    this.appendStep(uid, 'reconcile', 'ok', line.detail)
+    // The check reads as a chain the user asked for (2026-09-06): identity,
+    // the agreed domain, then the host-reported facts, then the verdict.
+    this.appendStep(uid, '工号', 'info', uid)
+    this.appendStep(uid, '域名', 'info', ideUrl(this.config, uid))
+    for (const marker of markers) {
+      const label = CHECK_LABELS[marker.step]
+      if (label !== undefined) this.appendStep(uid, label, marker.status, marker.detail)
+    }
+    if (reconcile.kind === 'healthy') this.appendStep(uid, '结论', 'info', '专属IDE状态正常')
     this.emit(uid, this.stateEvent(uid))
     return reconcile
   }

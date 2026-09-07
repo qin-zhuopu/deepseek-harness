@@ -141,8 +141,10 @@ export function createPortalServer(
       // Fast open (requester, 2026-09-06): the HTML answers immediately and
       // the arrival check runs behind the request — its chain streams to the
       // page over /api/events while the user already sees it. The reconcile
-      // probe is read-only; provisioning stays behind the check button.
-      void orchestrator.arrive(uid)
+      // probe is read-only; provisioning stays behind the check button. The
+      // arrival is the ONLY log-clearing check (requester, 2026-09-07): a
+      // fresh page view starts a fresh log, button clicks only append.
+      void orchestrator.arrive(uid, { clear: true })
       serveStatic('/', res)
       return
     }

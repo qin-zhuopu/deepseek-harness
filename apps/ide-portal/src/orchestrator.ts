@@ -40,6 +40,17 @@ export function probeUrl(url: URL, timeoutMs: number): Promise<number | undefine
   })
 }
 
+/** Options for the check entry points (requester, 2026-09-07). */
+export interface CheckOptions {
+  /**
+   * Reset the log before rendering the new chain. TRUE only for the page
+   * arrival (GET /): a fresh page view starts a fresh log. Every button
+   * click appends — the requester's rule is that no button may clear the
+   * log, only a page refresh may.
+   */
+  clear?: boolean
+}
+
 /** Subscriber signature for the live event stream. */
 export type Listener = (uid: string, event: LiveEvent) => void
 
@@ -171,12 +182,12 @@ export class Orchestrator {
    * machine transition — the host, not a transient Jenkins outage, is the
    * truth the banner reflects.
    */
-  async arrive(uid: string): Promise<void> {
+  async arrive(uid: string, options: CheckOptions = {}): Promise<void> {
     const run = this.ensure(uid)
     run.checking = true
     this.emit(uid, this.stateEvent(uid))
     try {
-      await this.reconcile(uid)
+      await this.reconcile(uid, options)
     } catch (error) {
       this.appendStep(uid, '检查', 'fail', `自动检查没有完成,请点击「检查我的IDE」重试;多次失败请联系管理员。（原因：${error instanceof Error ? error.message : String(error)}）`)
     } finally {
@@ -192,16 +203,11 @@ export class Orchestrator {
    * or a proxy 5xx reads as not running. The absent/stopped distinction
    * does not matter to the user: 启动 converges both.
    */
-  async reconcile(uid: string): Promise<Reconcile> {
+  async reconcile(uid: string, options: CheckOptions = {}): Promise<Reconcile> {
     const run = this.ensure(uid)
-    // TODO(requester, 2026-09-07): only a page refresh (GET /) should clear
-    // the log; a button click (检查我的IDE via /api/check, 启动我的IDE via
-    // /api/provision) must append to the existing steps instead. Today this
-    // reset runs on every reconcile(), so /api/check also wipes prior log
-    // lines. Needs a caller-supplied clear/append flag threaded from
-    // server.ts through arrive()/reconcile(), plus updated tests for the
-    // "check preserves prior log" case.
-    run.steps = []
+    // Only the page arrival clears the log (requester, 2026-09-07); button
+    // clicks append, and provision never clears at all.
+    if (options.clear === true) run.steps = []
     this.appendStep(uid, '工号', 'info', uid)
     const url = ideUrl(this.config, uid)
     this.appendStep(uid, '域名', 'info', url)

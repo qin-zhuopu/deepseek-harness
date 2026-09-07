@@ -116,20 +116,40 @@ describe('cold path (FR4, US1)', () => {
 })
 
 describe('arrival check (fast open, 2026-09-06)', () => {
-  it('each check renders exactly one chain; seq stays monotonic across the reset', async () => {
+  it('a page-arrival check resets the log to one fresh chain; seq stays monotonic', async () => {
     const { orchestrator, jenkins, probeResults } = await harness()
     probeResults.push(401, undefined)
-    await orchestrator.reconcile('14409')
+    await orchestrator.reconcile('14409', { clear: true })
     const firstSeqs = orchestrator.run('14409').steps.map(s => s.seq)
-    await orchestrator.reconcile('14409')
+    await orchestrator.reconcile('14409', { clear: true })
     const run = orchestrator.run('14409')
-    // The second check shows one fresh chain (no replayed history drowning the
-    // new verdict) and its seqs continue past the first check's.
+    // The arrival owns the only clear: a fresh page view starts a fresh log,
+    // and its seqs continue past the previous visit's.
     expect(run.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
     expect(run.snapshot.state).toBe('NO_SERVICE')
     expect(Math.min(...run.steps.map(s => s.seq))).toBeGreaterThan(Math.max(...firstSeqs))
     // The direct check never touches Jenkins.
     expect(jenkins.triggered).toEqual([])
+  })
+
+  it('a button click appends to the log and never clears it (requester, 2026-09-07)', async () => {
+    const { orchestrator, jenkins, probeResults } = await harness()
+    probeResults.push(401, undefined)
+    await orchestrator.reconcile('14409', { clear: true })
+    const before = orchestrator.run('14409').steps.map(s => s.seq)
+    // 检查我的IDE and any later check append after the earlier lines.
+    await orchestrator.reconcile('14409')
+    const run = orchestrator.run('14409')
+    const steps = run.steps.map(s => s.step)
+    expect(steps.slice(0, 5)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
+    expect(steps.slice(5)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
+    expect(Math.min(...run.steps.slice(5).map(s => s.seq))).toBeGreaterThan(Math.max(...before))
+    // Provision (启动我的IDE) never clears either: its steps land after the checks.
+    jenkins.script('create', { console: '[DSH_STEP] 1 ready ok done\n', result: 'SUCCESS' })
+    expect(await orchestrator.start('14409')).toBe('READY')
+    const names = orchestrator.run('14409').steps.map(s => s.step)
+    expect(names.slice(0, 10)).toEqual(steps)
+    expect(names[10]).toBe('开始启动')
   })
 
   it('a 401/302 answer reads as the login gate protecting a healthy service', async () => {

@@ -223,6 +223,21 @@ describe('启动 semantics (idempotent convergence, 2026-09-06)', () => {
     expect(snapshot.state.state).toBe('NO_SERVICE')
     expect(snapshot.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
   })
+
+  it('button checks append to the log; only the page arrival clears it (requester, 2026-09-07)', async () => {
+    const h = await start()
+    // Arrival: fresh log with one chain.
+    await fetch(`${h.base}/`, { headers: { authorization: `Bearer ${h.token}`, accept: 'text/html' } })
+    const arrived = await pollChecked(h)
+    expect(arrived.steps.map(s => s.step)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
+    // Button: appends a second chain, keeps the first.
+    h.setProbe(undefined)
+    await fetch(`${h.base}/api/check`, { method: 'POST', headers: { authorization: `Bearer ${h.token}` } })
+    const after = await pollChecked(h)
+    const names = after.steps.map(s => s.step)
+    expect(names.slice(0, 5)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
+    expect(names.slice(5)).toEqual(['工号', '域名', '检查', '服务状态', '结论'])
+  })
 })
 
 describe('cold path page (FR4, FR5)', () => {

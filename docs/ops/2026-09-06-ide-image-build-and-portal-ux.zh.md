@@ -67,4 +67,4 @@ docker run -d --name ide-portal --restart unless-stopped --network dc_default \
 
 ## 当前状态
 
-生产门户 = 提交 2a7b697fd7(秒开版,77 tests 绿);三按钮版(4eecdebbc1 起)已本地 dev 验证待发布。ide-14409 已开通健康(dev 页面点"启动我的IDE"走真实链路创建,build #125)。IDE 镜像 dsh-aio:dev-amd64 = build 37,开机全自动。
+生产门户已于当日发布至新版(master 37060b3a2f 一线,镜像 9ae02dee1be8):直接 vhost 检查(无 Jenkins)、三按钮常驻、启动单次幂等构建、宿主机 provision.sh 带 skipping 逻辑(旧版备份在 /opt/ide-provision/provision.sh.bak.*)。发布走 dsh-aio-remote-exec(#220 脚本+镜像、#221 换容器,换前已 docker inspect 存配置)。Chrome 实测:打开页面同秒出检查链,结论正常。ide-14409 运行中。IDE 镜像 dsh-aio:dev-amd64 = build 37,开机全自动。

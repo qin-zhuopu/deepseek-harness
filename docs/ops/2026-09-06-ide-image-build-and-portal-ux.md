@@ -67,4 +67,4 @@ Every portal REST API sits behind that verification gate (`guard()` in `server.t
 
 ## Current state
 
-Production portal = commit 2a7b697fd7 (instant-open version, 77 tests green); the three-button version (from 4eecdebbc1) is verified in local dev and awaiting release. ide-14409 is provisioned and healthy (created by clicking 启动我的IDE on the dev page through the real chain, build #125). The IDE image dsh-aio:dev-amd64 = build 37 and boots fully automatically.
+The production portal shipped the new line the same day (master through 37060b3a2f, image 9ae02dee1be8): direct vhost check (no Jenkins), three always-visible buttons, one idempotent 启动 build, and the host provision.sh carries the skip logic (the old script is backed up at /opt/ide-provision/provision.sh.bak.*). The rollout went through dsh-aio-remote-exec (#220 script+image, #221 container swap, with the live config captured by docker inspect first). Chrome on the production URL: the check chain renders the same second the page opens, verdict healthy. ide-14409 is running. The IDE image dsh-aio:dev-amd64 = build 37 and boots fully automatically.

@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/ops/2026-09-06-ide-image-build-and-portal-ux.md
-2026-09-06-ide-image-build-and-portal-ux.md: 6099447944134e3ea288137e5e4c366def8ec665
-2026-09-06-ide-image-build-and-portal-ux.zh.md: ebc898860fdcdca27664ff18e95bfe321b0255c1
+2026-09-06-ide-image-build-and-portal-ux.md: cf9112a528d33812385e662a373077c13033eeb3
+2026-09-06-ide-image-build-and-portal-ux.zh.md: 37ceb5f940d8182106eb3af3bf3ccc1f204646a6

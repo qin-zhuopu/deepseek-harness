@@ -48,10 +48,9 @@ function renderState(event) {
 
 function renderStep(step) {
   if (step.seq <= seenSeq) return
-  // 工号 opens every check chain: a second one means the server started a
-  // new check (the per-check step-log reset) — drop the previous chain so
-  // only the current one shows.
-  if (step.step === '工号' && logEl.childElementCount > 0) logEl.textContent = ''
+  // Append-only (requester, 2026-09-07): the client never clears the log —
+  // only a page refresh does (a fresh document starts empty, and the
+  // arrival GET / is the only server-side clear). Chains accumulate.
   seenSeq = step.seq
   const time = logTime.format(new Date(step.atMs))
   const line = document.createElement('div')

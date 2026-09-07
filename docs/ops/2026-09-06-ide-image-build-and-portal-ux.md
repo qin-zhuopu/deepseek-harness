@@ -24,6 +24,16 @@ English | [中文](2026-09-06-ide-image-build-and-portal-ux.zh.md)
 
 ## Image build chain: four stacked defects and their fixes
 
+## Jenkins job roles: which builds the portal, which builds user IDEs
+
+The IDE portal involves 3 jobs with distinct duties — do not mix them (clarified 2026-09-07: the portal provisions through `ide-provision-whole-dir`, NOT `ide-provision`; trusting the wrong name once produced a false "start never triggered" diagnosis while the build ran under the other job):
+
+- **`ide-provision-whole-dir` — builds user IDEs** (triggered by the portal when the user clicks 启动我的IDE). Parameters `UID/ACTION/IMAGE_TAG/REQUEST_ID` (ACTION only uses create; idempotence lives in the host provision.sh: undeployed → deploy, stopped → start, running → skip the start and confirm by probe). It creates each user's container `ide-<uid>` with the whole-directory mount `/data/ide/<uid>`.
+- **`ide-portal-deploy` — builds and deploys the IDE portal itself** (the portal's own image ide-portal:dev and its container swap). Release the portal through it, or through `dsh-aio-remote-exec` running the equivalent commands by hand; unrelated to user IDEs.
+- **`ide-provision` — the early provisioning job (named-volume variant), retired**. The portal configuration does not point at it; it remains for comparison and manual diagnostics — when triaging, portal.yaml's `jenkins.job` is the authority.
+
+Supporting infrastructure: `dsh-aio-dev-build` (builds the IDE base image dsh-aio:dev-amd64 every user IDE runs on; the PUSH_HARBOR parameter decides whether it is pushed to Harbor), `dsh-aio-remote-exec` (host remote-execution channel for releases and inspections), `dsh-aio-dev-smoke` (image smoke test).
+
 The build script `docker/build-dsh-aio-dev-amd64-internal.sh` (Jenkins runs it on the host) is two-stage: `docker/dsh/Dockerfile.internal` → `dsh:dev-amd64` → `docker/dsh-aio/Dockerfile.internal` → `dsh-aio:dev-amd64`.
 
 1. **Cache invalidation (the slowness)**: `COPY . .` preceded the dependency-install layer, so every commit re-downloaded 939 packages from the slow Nexus. Fix: `COPY pnpm-lock.yaml pnpm-workspace.yaml ./` + `COPY patches/ patches/` + `RUN pnpm fetch` warms the store, then `COPY . .` + install. Install went from ~15 min to **1m40s** (commits 23b986dbd7, 7ff7220f73).

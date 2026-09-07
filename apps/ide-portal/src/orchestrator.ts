@@ -194,6 +194,13 @@ export class Orchestrator {
    */
   async reconcile(uid: string): Promise<Reconcile> {
     const run = this.ensure(uid)
+    // TODO(requester, 2026-09-07): only a page refresh (GET /) should clear
+    // the log; a button click (检查我的IDE via /api/check, 启动我的IDE via
+    // /api/provision) must append to the existing steps instead. Today this
+    // reset runs on every reconcile(), so /api/check also wipes prior log
+    // lines. Needs a caller-supplied clear/append flag threaded from
+    // server.ts through arrive()/reconcile(), plus updated tests for the
+    // "check preserves prior log" case.
     run.steps = []
     this.appendStep(uid, '工号', 'info', uid)
     const url = ideUrl(this.config, uid)

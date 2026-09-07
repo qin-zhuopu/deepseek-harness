@@ -12,7 +12,7 @@
 | 门户 dev | `node --experimental-strip-types apps/ide-portal/src/cli.ts --config /tmp/portal-dev.yaml --state /tmp/ide-portal-dev-state`,监听 127.0.0.1:8188 |
 | Jenkins | https://new-jenkins.jereh.cn (API 返回包了一层 `{"success":true,"data":{…}}`,取值先解 `data`) |
 | 镜像构建任务 | `dsh-aio-dev-build`(参数 `PUSH_HARBOR`,必须 `--data-urlencode` 表单编码,JSON 体会被静默忽略回退 0) |
-| 门户执行任务 | `ide-provision`(ACTION=probe/create/start/stop;probe 只读) |
+| 用户 IDE 开通任务 | `ide-provision-whole-dir`(ACTION=create;portal.yaml 的 `jenkins.job` 指向它;整目录挂载 `/data/ide/<工号>` 版) |
 | 宿主执行通道 | `dsh-aio-remote-exec`(参数 `TARGET_HOST=10.1.17.58`、`SCRIPT_B64`);单执行器,一个卡死的构建会堵住后续触发,队列卡住看 `/queue/item/<id>/api/json` 的 `why`,终止用 `POST /job/<job>/<n>/term` |
 | 宿主机 | 10.1.17.58(ssh 用户 admin;Docker 网络 `dc_default`) |
 | 用户 IDE | `http://ide-<工号>.jereh-pe.cn/`,容器名 `ide-<工号>`,示例:ide-14409 |
@@ -23,6 +23,16 @@
 | IAM | 生产 iam.jereh.cn(宿主机出网不通它,靠 trustFile 离线信任;测试环境 iam-test.jereh.cn 通,禁用于生产) |
 
 ## 镜像构建链:四个叠加的坑与修复
+
+## Jenkins job 分工(谁构建门户、谁构建用户 IDE)
+
+IDE 门户涉及 3 个 job,职责不同,别混(2026-09-07 澄清:门户实际开通走 `ide-provision-whole-dir`,不是 `ide-provision`——曾因此误判"启动没触发",其实 job 跑在另一个名字下):
+
+- **`ide-provision-whole-dir` — 构建用户 IDE**(用户点"启动我的IDE"时由门户触发)。参数 `UID/ACTION/IMAGE_TAG/REQUEST_ID`(ACTION 目前只用 create,幂等判断在宿主机 provision.sh 内:未部署→部署,已停止→启动,已运行→跳过启动只探测确认)。每个用户的 IDE 容器 `ide-<工号>` 由它创建,整目录挂载 `/data/ide/<工号>`。
+- **`ide-portal-deploy` — 构建并部署 IDE 门户本身**(门户的镜像 ide-portal:dev 与容器轮换)。发布门户新版走它,或走 `dsh-aio-remote-exec` 手工执行等价命令;与用户 IDE 无关。
+- **`ide-provision` — 早期开通 job(命名卷版),已弃用**。门户配置不指向它,仅留作对照/手工诊断;排查时别盯错——看 portal.yaml 的 `jenkins.job` 才是权威。
+
+辅助基建:`dsh-aio-dev-build`(构建 IDE 基础镜像 dsh-aio:dev-amd64,供所有用户 IDE 使用;参数 PUSH_HARBOR 决定是否推 Harbor)、`dsh-aio-remote-exec`(宿主机远程执行通道,发布/巡检用)、`dsh-aio-dev-smoke`(镜像冒烟)。
 
 构建脚本 `docker/build-dsh-aio-dev-amd64-internal.sh`(Jenkins 在宿主机上执行),两段式:`docker/dsh/Dockerfile.internal` → `dsh:dev-amd64` → `docker/dsh-aio/Dockerfile.internal` → `dsh-aio:dev-amd64`。
 

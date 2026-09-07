@@ -87,6 +87,11 @@ describe('cold path (FR4, US1)', () => {
       '开始启动', '排队', '启动中',
       '准备运行环境', '部署', '启动服务', '启动后自检', '外部访问检查', '就绪',
     ])
+    // The start hook only fires the entrypoint; the wording must not claim
+    // the service is up before the health checks confirm it.
+    const starting = orchestrator.run('14409').steps.find(s => s.step === '启动服务')
+    expect(starting?.status).toBe('info')
+    expect(starting?.detail).toContain('服务启动中')
     const create = jenkins.triggered.find(t => t.action === 'create')
     expect(create?.imageTag).toBe('dev-amd64-abc1234')
     const states = events.filter(e => e.type === 'state').map(e => e.state)
